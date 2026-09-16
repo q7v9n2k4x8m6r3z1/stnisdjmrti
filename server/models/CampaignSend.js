@@ -1,7 +1,7 @@
 import mongoose from 'mongoose';
 
 /**
- * One row per promotional email actually sent to one person.
+ * One row per promotional email attempt to one person.
  *
  * A separate collection rather than an array on the user document. Campaign
  * history grows without bound, and this codebase already carries one unbounded
@@ -11,13 +11,14 @@ import mongoose from 'mongoose';
  *
  * The compound unique index is what actually guarantees "never email the same
  * person twice", not the query that precedes the send. Checking first and
- * sending after is a race: two passes overlapping, or a restart mid-pass, can
- * both pass the check. Writing the row BEFORE sending, and letting a duplicate
- * key error mean "someone else already has this one", makes double-sending
+ * sending after is a race: two overlapping passes, or a restart mid-pass, can
+ * both pass the check. Claiming the row BEFORE sending, and treating a
+ * duplicate key as "someone else already has this one", makes double-sending
  * impossible rather than unlikely.
  *
  * This row is also the campaign's eligibility record: BIENVENIDA10 only works
- * for someone who received it, and only within 24 hours of `sentAt`.
+ * for someone whose email actually went out, and only within 24 hours of
+ * `sentAt`.
  */
 const campaignSendSchema = new mongoose.Schema(
   {
@@ -37,13 +38,32 @@ const campaignSendSchema = new mongoose.Schema(
       type: String,
       required: true,
     },
-    sentAt: {
+    // When the row was claimed — NOT when the email went out.
+    claimedAt: {
       type: Date,
       default: Date.now,
     },
-    // Set only when the send fails. The row is written first so the slot is
-    // claimed; a failure is recorded rather than deleted, so a broken address
-    // is not retried forever on every pass.
+    // Set only on a successful send, and reset on every successful retry.
+    //
+    // Deliberately null until delivery is accepted: the customer's 24-hour
+    // discount window is measured from here, and measuring it from a failed
+    // first attempt would hand someone a code that had already partly expired
+    // before they ever saw the email.
+    sentAt: {
+      type: Date,
+      default: null,
+    },
+    // How many times sending has been attempted. A transient failure — a rate
+    // limit, a momentary network fault — must be retried, or the recipient is
+    // silently dropped. A permanent one must not be retried forever.
+    attempts: {
+      type: Number,
+      default: 0,
+    },
+    lastAttemptAt: {
+      type: Date,
+      default: null,
+    },
     failedAt: {
       type: Date,
       default: null,
@@ -52,11 +72,19 @@ const campaignSendSchema = new mongoose.Schema(
       type: String,
       default: null,
     },
+    // True when the address itself is the problem and retrying cannot help —
+    // a malformed address, or a well-known provider typo such as gmail.con.
+    // Kept distinct from a transient failure so the report can show the admin
+    // what to correct rather than burying it among network errors.
+    permanentFailure: {
+      type: Boolean,
+      default: false,
+    },
   },
   { timestamps: true }
 );
 
-// The guarantee behind requirement "the same user cannot receive the email twice".
+// The guarantee behind "the same user cannot receive the email twice".
 campaignSendSchema.index({ campaign: 1, userId: 1 }, { unique: true });
 
 export default mongoose.model('CampaignSend', campaignSendSchema);

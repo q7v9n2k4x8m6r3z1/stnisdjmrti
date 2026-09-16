@@ -38,6 +38,7 @@ import User from '../models/User.js';
 import CampaignSend from '../models/CampaignSend.js';
 import { sendEmail } from './emailService.js';
 import { buildUnsubscribeUrl } from '../utils/unsubscribeToken.js';
+import { checkEmailAddress } from '../utils/emailAddress.js';
 
 export const CAMPAIGN = 'bienvenida10';
 export const CAMPAIGN_CODE = 'BIENVENIDA10';
@@ -52,6 +53,22 @@ const WAIT_MS = 24 * 60 * 60 * 1000;
 const MAX_AGE_DAYS = 7;
 
 const MAX_PER_PASS = 50;
+
+/**
+ * Gap between sends. Resend rate-limits around 2 requests/second on standard
+ * plans, and a burst of thirty back-to-back sends is exactly the shape that
+ * trips it. Pacing is cheaper than handling the 429.
+ */
+const SEND_INTERVAL_MS = 600;
+
+/**
+ * How many times a transient failure is retried on later passes before the
+ * recipient is given up on. Without a cap a permanently unreachable mailbox
+ * would be attempted every hour forever.
+ */
+const MAX_ATTEMPTS = 3;
+
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
 const SUBJECT = '🎁 Tu 10 % de descuento caduca en 24 horas';
 
@@ -95,8 +112,10 @@ const testAllowlist = () =>
 export async function isCampaignCodeValidFor(userId) {
   if (!userId) return { ok: false, message: 'Este código no está disponible para tu cuenta' };
 
+  // sentAt, not the row's existence: a claimed-but-unsent row means the email
+  // never reached them, so the code they have not seen must not work.
   const row = await CampaignSend.findOne({ campaign: CAMPAIGN, userId }).lean();
-  if (!row || row.failedAt) {
+  if (!row || !row.sentAt) {
     return { ok: false, message: 'Este código no está disponible para tu cuenta' };
   }
 
@@ -133,17 +152,24 @@ async function findCandidates() {
 
   if (!candidates.length) return [];
 
-  // Drop anyone already emailed. The unique index is the real guarantee; this
-  // just avoids generating work that would be rejected.
+  // Drop anyone already dealt with. The unique index is the real guarantee;
+  // this avoids generating work that would be rejected.
   const already = await CampaignSend.find({
     campaign: CAMPAIGN,
     userId: { $in: candidates.map(u => u._id) },
   })
-    .select('userId')
+    .select('userId sentAt attempts permanentFailure')
     .lean();
 
-  const seen = new Set(already.map(r => String(r.userId)));
-  return candidates.filter(u => !seen.has(String(u._id))).slice(0, MAX_PER_PASS);
+  // Sent, given up on, or unreachable. A transient failure with attempts left
+  // stays eligible, so the next pass retries it — otherwise a single rate
+  // limit would drop that person from the campaign silently and for good.
+  const done = new Set(
+    already
+      .filter(r => r.sentAt || r.permanentFailure || (r.attempts || 0) >= MAX_ATTEMPTS)
+      .map(r => String(r.userId))
+  );
+  return candidates.filter(u => !done.has(String(u._id))).slice(0, MAX_PER_PASS);
 }
 
 /** Build this recipient's copy of the email. */
@@ -161,7 +187,7 @@ function render(user) {
  * One pass. Returns a report; writes nothing when dryRun is set.
  */
 export async function runWelcomeCampaignPass({ dryRun = false } = {}) {
-  const report = { eligible: 0, sent: 0, failed: 0, skipped: 0, dryRun, recipients: [] };
+  const report = { eligible: 0, sent: 0, failed: 0, skipped: 0, dryRun, recipients: [], invalid: [] };
 
   if (!isEnabled() && !dryRun) {
     console.log('[welcome-campaign] disabled (WELCOME_CAMPAIGN_ENABLED is not "true") — nothing sent');
@@ -177,9 +203,41 @@ export async function runWelcomeCampaignPass({ dryRun = false } = {}) {
     return report;
   }
 
+  let sendIndex = 0;
   for (const user of candidates) {
     if (allowlist.length && !allowlist.includes(String(user.email).toLowerCase())) {
       report.skipped++;
+      continue;
+    }
+
+    // Addresses that will certainly bounce never reach Resend. A hard bounce
+    // costs sender reputation, and a domain that has only ever sent receipts
+    // has none to spare. The address is reported, never corrected: mailing a
+    // guessed address could send someone's discount code to a stranger.
+    const address = checkEmailAddress(user.email);
+    if (!address.ok) {
+      report.invalid.push({
+        email: user.email,
+        reason: address.reason,
+        suggestion: address.suggestion || null,
+      });
+      if (!dryRun) {
+        // Recorded as permanently failed so later passes stop reconsidering
+        // it, and so the report can show the admin what to correct.
+        await CampaignSend.updateOne(
+          { campaign: CAMPAIGN, userId: user._id },
+          {
+            $setOnInsert: { email: user.email, claimedAt: new Date() },
+            $set: {
+              failedAt: new Date(),
+              failureReason: address.reason,
+              permanentFailure: true,
+              lastAttemptAt: new Date(),
+            },
+          },
+          { upsert: true }
+        ).catch(err => console.error(`[welcome-campaign] could not record invalid ${user.email}: ${err.message}`));
+      }
       continue;
     }
 
@@ -188,18 +246,43 @@ export async function runWelcomeCampaignPass({ dryRun = false } = {}) {
       continue;
     }
 
-    // Claim the slot first. A duplicate key here means another pass, or
-    // another worker, already has this person — not an error worth logging as
-    // a failure.
-    let claim;
+    // Claim the slot before sending. A duplicate key means a row already
+    // exists — either someone already received it, or a previous attempt
+    // failed and may be retried.
+    const now = new Date();
     try {
-      claim = await CampaignSend.create({ campaign: CAMPAIGN, userId: user._id, email: user.email });
+      await CampaignSend.create({
+        campaign: CAMPAIGN,
+        userId: user._id,
+        email: user.email,
+        attempts: 1,
+        lastAttemptAt: now,
+      });
     } catch (err) {
-      if (err?.code === 11000) { report.skipped++; continue; }
-      console.error(`[welcome-campaign] could not claim ${user.email}: ${err.message}`);
-      report.failed++;
-      continue;
+      if (err?.code !== 11000) {
+        console.error(`[welcome-campaign] could not claim ${user.email}: ${err.message}`);
+        report.failed++;
+        continue;
+      }
+      // Take over a failed attempt, but only one that is still retriable. The
+      // filter does the deciding atomically: if it matches nothing, another
+      // worker got there first or this person is already done.
+      const retry = await CampaignSend.findOneAndUpdate(
+        {
+          campaign: CAMPAIGN,
+          userId: user._id,
+          sentAt: null,
+          permanentFailure: { $ne: true },
+          attempts: { $lt: MAX_ATTEMPTS },
+        },
+        { $inc: { attempts: 1 }, $set: { lastAttemptAt: now } },
+        { new: true }
+      );
+      if (!retry) { report.skipped++; continue; }
     }
+
+    // Pace the sends. Not before the first one.
+    if (sendIndex++ > 0) await sleep(SEND_INTERVAL_MS);
 
     const { html, text, unsubscribeUrl } = render(user);
     const result = await sendEmail({
@@ -215,16 +298,30 @@ export async function runWelcomeCampaignPass({ dryRun = false } = {}) {
     });
 
     if (result?.success === false) {
-      // Keep the row and mark it failed rather than deleting it, so a broken
-      // address is not retried on every pass forever.
+      // Left retriable on purpose. The row keeps its attempt count, so the
+      // next pass tries again until MAX_ATTEMPTS — a rate limit or a momentary
+      // network fault must not remove someone from the campaign permanently.
       await CampaignSend.updateOne(
-        { _id: claim._id },
-        { $set: { failedAt: new Date(), failureReason: String(result.error?.message || 'send failed').slice(0, 300) } }
+        { campaign: CAMPAIGN, userId: user._id },
+        {
+          $set: {
+            failedAt: new Date(),
+            failureReason: String(result.error?.message || 'send failed').slice(0, 300),
+          },
+        }
       );
       report.failed++;
-      console.error(`[welcome-campaign] send failed for ${user.email}`);
+      console.error(`[welcome-campaign] send failed for ${user.email} (attempt recorded, will retry)`);
       continue;
     }
+
+    // Stamp sentAt only now. The customer's 24-hour discount window starts
+    // when the email actually goes out, not when the row was claimed — a
+    // retried send would otherwise arrive with part of its window gone.
+    await CampaignSend.updateOne(
+      { campaign: CAMPAIGN, userId: user._id },
+      { $set: { sentAt: new Date(), failedAt: null, failureReason: null } }
+    );
 
     report.sent++;
     report.recipients.push(user.email);

@@ -18,6 +18,7 @@
  */
 import stripe from '../config/stripe.js';
 import SubscriptionPlan from '../models/SubscriptionPlan.js';
+import { CAMPAIGN_CODE, isCampaignCodeValidFor } from '../services/welcomeCampaign.js';
 
 /** Shape a Stripe promotion code + its coupon into one flat row for the admin table. */
 function toAdminRow(promo) {
@@ -302,9 +303,18 @@ export const deleteCoupon = async (req, res) => {
  *
  * @returns {Promise<{ok: true, promo: object} | {ok: false, message: string}>}
  */
-export async function resolvePromotionCode(rawCode) {
+export async function resolvePromotionCode(rawCode, { userId = null } = {}) {
   const code = String(rawCode || '').trim().toUpperCase();
   if (!code) return { ok: false, message: 'Enter a code' };
+
+  // Campaign codes carry a per-recipient window that Stripe cannot express: a
+  // shared promotion code has one expiry for everyone, but BIENVENIDA10 must
+  // die 24 hours after each person's email. The rule lives in one place and is
+  // applied here so the checkout preview and the actual charge cannot differ.
+  if (code === CAMPAIGN_CODE) {
+    const eligible = await isCampaignCodeValidFor(userId);
+    if (!eligible.ok) return { ok: false, message: eligible.message };
+  }
 
   // Deliberately NOT filtered by customer.
   //
@@ -353,7 +363,7 @@ export const validateCoupon = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Invalid plan' });
     }
 
-    const result = await resolvePromotionCode(code);
+    const result = await resolvePromotionCode(code, { userId: req.user?.id || req.user?._id || null });
     if (!result.ok) {
       return res.status(200).json({ success: false, message: result.message });
     }

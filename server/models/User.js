@@ -223,6 +223,18 @@ const userSchema = new mongoose.Schema({
     enum: ['en', 'es'],
     default: 'en'
   },
+  // Opt-out from promotional email. Transactional mail — receipts, payment
+  // failures, device alerts, password resets — ignores this and must continue
+  // to send: those are part of the service the customer pays for, not
+  // marketing. Only campaigns check it.
+  marketingOptOut: {
+    type: Boolean,
+    default: false
+  },
+  marketingOptOutAt: {
+    type: Date,
+    default: null
+  },
   maxDevices: {
     type: Number,
     default: 2

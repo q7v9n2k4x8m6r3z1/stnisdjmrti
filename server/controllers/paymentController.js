@@ -19,10 +19,12 @@ import { resolvePromotionCode } from './couponController.js';
  * An invalid code is refused rather than dropped: a customer who typed a code
  * and was charged full price without being told would have a fair complaint.
  */
-async function buildDiscounts(promotionCode) {
+async function buildDiscounts(promotionCode, userId) {
   if (!promotionCode || !String(promotionCode).trim()) return { ok: true, discounts: undefined };
 
-  const result = await resolvePromotionCode(promotionCode);
+  // userId matters for campaign codes: BIENVENIDA10 is only valid for the
+  // person it was emailed to, and only for 24 hours after that send.
+  const result = await resolvePromotionCode(promotionCode, { userId });
   if (!result.ok) return { ok: false, message: result.message };
 
   return { ok: true, discounts: [{ promotion_code: result.promo.id }] };
@@ -121,7 +123,7 @@ export const subscribeWithSavedCard = async (req, res) => {
 
     // Resolve the discount code before charging, so an invalid one is refused
     // rather than quietly dropped and the customer billed the full price.
-    const savedCardPromo = await buildDiscounts(req.body.promotionCode);
+    const savedCardPromo = await buildDiscounts(req.body.promotionCode, req.user.id);
     if (!savedCardPromo.ok) {
       return res.status(400).json({ success: false, message: savedCardPromo.message, invalidCode: true });
     }
@@ -311,7 +313,7 @@ export const createCheckoutSession = async (req, res) => {
     // Create recurring subscription checkout session.
     // Omitting payment_method_types lets Stripe Checkout show all methods enabled
     // in the Dashboard (Google Pay, Apple Pay, Link, card, etc.) automatically.
-    const promo = await buildDiscounts(req.body.promotionCode);
+    const promo = await buildDiscounts(req.body.promotionCode, req.user._id);
     if (!promo.ok) {
       return res.status(400).json({ success: false, message: promo.message, invalidCode: true });
     }

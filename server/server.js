@@ -35,10 +35,12 @@ import deviceRoutes from './routes/device.js';
 import categoryRoutes from './routes/category.js';
 import mashupCategoryRoutes from './routes/mashupCategory.js';
 import contactRoutes from './routes/contact.js';
+import emailRoutes from './routes/email.js';
 import couponRoutes from './routes/coupon.js';
 import mongoose from 'mongoose';
 import { startSubscriptionReconciler } from './services/subscriptionReconciler.js';
 import { startAccessDriftMonitor } from './services/accessDriftMonitor.js';
+import { startWelcomeCampaign } from './services/welcomeCampaign.js';
 import { startTempSweeper } from './utils/tempCleanup.js';
 import { recoverOrphanedJobs } from './services/processingQueue.js';
 
@@ -161,6 +163,9 @@ app.use('/api/devices', deviceRoutes);
 app.use('/api/categories', categoryRoutes);
 app.use('/api/mashup-categories', mashupCategoryRoutes);
 app.use('/api/contact', contactRoutes);
+// Public and unauthenticated — the unsubscribe link is signed, and the person
+// clicking it is reading an email, not signed in.
+app.use('/api/email', emailRoutes);
 app.use('/api/coupons', couponRoutes);
 
 // Health check.
@@ -218,6 +223,9 @@ const server = app.listen(PORT, () => {
   // does OUR record grant that Stripe was never paid for? Reports only — never
   // revokes. See services/accessDriftMonitor.js.
   startAccessDriftMonitor();
+  // BIENVENIDA10 win-back email. Off unless WELCOME_CAMPAIGN_ENABLED is
+  // explicitly 'true', so a deploy cannot start mailing customers by itself.
+  startWelcomeCampaign();
   // Remove upload temp files orphaned by a crash or restart (23 GB had
   // accumulated in production). Runs now and every 6h.
   startTempSweeper();

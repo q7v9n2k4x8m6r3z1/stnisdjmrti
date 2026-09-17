@@ -3,7 +3,12 @@ import { getOverview } from '../controllers/adminController.js';
 import { protect, authorize } from '../middleware/auth.js';
 import { reconcileSubscriptions } from '../services/subscriptionReconciler.js';
 import { detectAccessDrift } from '../services/accessDriftMonitor.js';
-import { runWelcomeCampaignPass, CAMPAIGN } from '../services/welcomeCampaign.js';
+import {
+  runWelcomeCampaignPass,
+  renderCampaignEmail,
+  sendCampaignTest,
+  CAMPAIGN,
+} from '../services/welcomeCampaign.js';
 import CampaignSend from '../models/CampaignSend.js';
 import User from '../models/User.js';
 
@@ -103,6 +108,55 @@ router.post('/campaign/bienvenida10/preview', protect, authorize('admin'), async
     res.status(200).json({ success: true, data: report });
   } catch (error) {
     console.error('[campaign] preview failed:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// See the email exactly as a recipient would, in a browser tab.
+//
+// Rendered through the same function the real send uses, so it cannot drift
+// from what customers actually receive. Writes nothing.
+//
+// Caveat worth knowing: a browser is not a mail client. Outlook ignores the
+// background textures and falls back to flat colour — intentional, per the
+// designer — and only a real send shows that. Use the test endpoint for it.
+router.get('/campaign/bienvenida10/preview-html', protect, authorize('admin'), async (req, res) => {
+  try {
+    // The admin's own id, so the unsubscribe link in the preview is real and
+    // clickable. Harmless: admins are excluded from the campaign by role, so
+    // opting out changes nothing for them.
+    const { html } = renderCampaignEmail(req.user._id);
+    res.status(200).type('html').send(html);
+  } catch (error) {
+    console.error('[campaign] preview-html failed:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// Send the campaign email to one named address to check it in a real inbox.
+//
+// Bypasses the candidate query entirely and records no CampaignSend row: a
+// test must not consume a recipient, and must not make the discount code live
+// for anyone. The address is validated first, so a typo here fails loudly
+// rather than bouncing.
+router.post('/campaign/bienvenida10/test', protect, authorize('admin'), async (req, res) => {
+  try {
+    const to = String(req.body?.email || '').trim();
+    if (!to) {
+      return res.status(400).json({ success: false, message: 'Provide an email address to send the test to' });
+    }
+
+    const result = await sendCampaignTest({ to, userId: req.user._id });
+    if (!result.ok) {
+      return res.status(400).json({ success: false, message: result.message });
+    }
+
+    res.status(200).json({
+      success: true,
+      message: `Test email sent to ${to}. No campaign record was written and no recipient was consumed.`,
+    });
+  } catch (error) {
+    console.error('[campaign] test send failed:', error);
     res.status(500).json({ success: false, message: error.message });
   }
 });

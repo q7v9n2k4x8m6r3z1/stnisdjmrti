@@ -189,15 +189,56 @@ async function findCandidates() {
   return candidates.filter(u => !done.has(String(u._id))).slice(0, MAX_PER_PASS);
 }
 
-/** Build this recipient's copy of the email. */
-function render(user) {
+/**
+ * Build one recipient's copy of the email.
+ *
+ * Exported so the admin preview and the test send render through exactly the
+ * same path as a real send. A preview built separately would drift from the
+ * real thing and stop being worth looking at.
+ */
+export function renderCampaignEmail(userId) {
   const { html, text } = loadTemplates();
-  const url = buildUnsubscribeUrl(user._id);
+  const url = buildUnsubscribeUrl(userId);
   return {
+    subject: SUBJECT,
     html: html.split('{{unsubscribe_url}}').join(url),
     text: text.split('{{unsubscribe_url}}').join(url),
     unsubscribeUrl: url,
   };
+}
+
+/**
+ * Send the campaign email to one named address, for checking rendering in a
+ * real inbox.
+ *
+ * Writes no CampaignSend row on purpose: a test must not consume a recipient,
+ * and must not make the discount code live for anyone. The subject is NOT
+ * prefixed — the point is to see exactly what a customer sees, including
+ * whether the subject line truncates on a phone.
+ */
+export async function sendCampaignTest({ to, userId }) {
+  const address = checkEmailAddress(to);
+  if (!address.ok) {
+    return { ok: false, message: `${address.reason}${address.suggestion ? ` — did you mean ${address.suggestion}?` : ''}` };
+  }
+
+  const { subject, html, text, unsubscribeUrl } = renderCampaignEmail(userId);
+  const result = await sendEmail({
+    to,
+    subject,
+    html,
+    text,
+    headers: {
+      'List-Unsubscribe': `<${unsubscribeUrl}>`,
+      'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click',
+    },
+  });
+
+  if (result?.success === false) {
+    return { ok: false, message: String(result.error?.message || 'send failed') };
+  }
+  console.log(`[welcome-campaign] TEST email sent to ${to}`);
+  return { ok: true };
 }
 
 /**
@@ -301,7 +342,7 @@ export async function runWelcomeCampaignPass({ dryRun = false } = {}) {
     // Pace the sends. Not before the first one.
     if (sendIndex++ > 0) await sleep(SEND_INTERVAL_MS);
 
-    const { html, text, unsubscribeUrl } = render(user);
+    const { html, text, unsubscribeUrl } = renderCampaignEmail(user._id);
     const result = await sendEmail({
       to: user.email,
       subject: SUBJECT,

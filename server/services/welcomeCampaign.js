@@ -144,6 +144,23 @@ async function findCandidates() {
     // for paid (f4f79ce).
     'subscription.planId': NOT_PAID,
     'subscription.plan': NOT_PAID,
+
+    // Never had any dealings with Stripe.
+    //
+    // The email opens "Has dado el primer paso al registrarte" — you have
+    // taken the first step by registering. To someone who already subscribed
+    // and cancelled, or who reached checkout and did not finish, that reads as
+    // if we have no idea who they are. A lapsed customer deserves a different
+    // message, not this one.
+    //
+    // Three independent traces, because any one of them can be absent: a
+    // customer id from ever reaching checkout, a subscription id from ever
+    // having a plan, and a history row from ever having paid. null also
+    // matches a missing field; 'subscriptionHistory.0' matches an array that
+    // is empty or absent.
+    'subscription.stripeCustomerId': { $in: [null, ''] },
+    'subscription.stripeSubscriptionId': { $in: [null, ''] },
+    'subscriptionHistory.0': { $exists: false },
   })
     .select('_id email name createdAt')
     .sort({ createdAt: 1 })

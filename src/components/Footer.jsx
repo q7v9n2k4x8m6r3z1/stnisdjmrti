@@ -68,22 +68,12 @@ export default function Footer() {
           </div>
         </div>
 
-        {/* Bottom bar */}
-        <div className="pt-6 border-t border-white/5 flex flex-col sm:flex-row items-center justify-between gap-3">
-          <p className="text-xs text-brand-text-tertiary">
+        {/* Bottom bar — copyright only. The build credit that sat here was
+            removed at the owner's request; centred now that it is alone. */}
+        <div className="pt-6 border-t border-white/5 flex items-center justify-center">
+          <p className="text-xs text-brand-text-tertiary text-center">
             © {new Date().getFullYear()} TodoDJS.{' '}
             {isEs ? 'Todos los derechos reservados.' : 'All rights reserved.'}
-          </p>
-          <p className="text-xs text-brand-text-tertiary">
-            {isEs ? 'Desarrollado por' : 'Developed by'}{' '}
-            <a
-              href="https://www.upwork.com/freelancers/~01570d6e8820d27bcf?mp_source=share"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-accent hover:text-white transition-colors duration-150 font-medium"
-            >
-              SolvaTree
-            </a>
           </p>
         </div>
       </div>

@@ -26,7 +26,7 @@ export default function PrivacyPolicyPage() {
           <section>
             <h2 className="text-lg font-semibold text-white mb-3">{isEs ? '1. Responsable del Tratamiento' : '1. Data Controller'}</h2>
             <ul className="space-y-1 pl-4 list-disc list-inside">
-              <li><strong className="text-white">{isEs ? 'Responsable:' : 'Data Controller:'}</strong> TODODJS LLC</li>
+              <li><strong className="text-white">{isEs ? 'Responsable:' : 'Data Controller:'}</strong> TodoDJS</li>
               <li><strong className="text-white">{isEs ? 'Dirección:' : 'Address:'}</strong> 4111 Hollowtrail Dr, Tampa, FL, United States</li>
               <li><strong className="text-white">{isEs ? 'Correo electrónico:' : 'Email:'}</strong> contacto.tododjs@gmail.com</li>
               <li><strong className="text-white">{isEs ? 'Sitio web:' : 'Website:'}</strong> www.tododjs.com</li>

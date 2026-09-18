@@ -303,8 +303,8 @@ export default function TermsPage() {
             </p>
             <p className="mt-2">
               {isEs
-                ? 'Cualquier controversia, reclamación o disputa relacionada con el acceso, uso o funcionamiento de la plataforma se someterá a la jurisdicción competente correspondiente al domicilio legal de TODODJS LLC, salvo que sean de aplicación disposiciones legales obligatorias.'
-                : 'Any controversy, claim, or dispute related to the access, use, or operation of the platform will be submitted to the competent jurisdiction corresponding to the legal address of TODODJS LLC, unless applicable mandatory legal provisions apply.'}
+                ? 'Cualquier controversia, reclamación o disputa relacionada con el acceso, uso o funcionamiento de la plataforma se someterá a la jurisdicción competente correspondiente al domicilio legal de TodoDJS, salvo que sean de aplicación disposiciones legales obligatorias.'
+                : 'Any controversy, claim, or dispute related to the access, use, or operation of the platform will be submitted to the competent jurisdiction corresponding to the legal address of TodoDJS, unless applicable mandatory legal provisions apply.'}
             </p>
           </section>
 

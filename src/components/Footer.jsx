@@ -8,7 +8,7 @@ export default function Footer() {
   const isEs = i18n.language?.startsWith('es');
 
   const legalLinks = [
-    { label: isEs ? 'Aviso Legal' : 'Legal Notice', path: '/aviso-legal' },
+
     { label: isEs ? 'Privacidad' : 'Privacy Policy', path: '/privacidad' },
     { label: 'Cookies', path: '/cookies' },
     { label: isEs ? 'Términos y Condiciones' : 'Terms & Conditions', path: '/terminos' },

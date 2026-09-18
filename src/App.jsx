@@ -45,7 +45,7 @@ const PricingPage = lazyWithRetry(() => import('./components/PricingPage'));
 const SubscriptionDashboard = lazyWithRetry(() => import('./components/SubscriptionDashboard'));
 const CategoryTrackSection = lazyWithRetry(() => import('./components/CategoryTrackSection'));
 const SettingsPage = lazyWithRetry(() => import('./pages/SettingsPage'));
-const LegalNoticePage = lazyWithRetry(() => import('./pages/LegalNoticePage'));
+
 const PrivacyPolicyPage = lazyWithRetry(() => import('./pages/PrivacyPolicyPage'));
 const CookiePolicyPage = lazyWithRetry(() => import('./pages/CookiePolicyPage'));
 const TermsPage = lazyWithRetry(() => import('./pages/TermsPage'));
@@ -66,7 +66,7 @@ const PATH_TO_PAGE = {
   '/pricing': 'pricing',
   '/subscription': 'subscription',
   '/settings': 'settings',
-  '/aviso-legal': 'legal-notice',
+
   '/privacidad': 'privacy',
   '/cookies': 'cookies-policy',
   '/terminos': 'terms',
@@ -903,8 +903,7 @@ function App() {
           />
         ) : activePage === 'settings' ? (
           <SettingsPage user={user} onUserUpdate={setUser} onLogout={handleLogout} />
-        ) : activePage === 'legal-notice' ? (
-          <LegalNoticePage />
+
         ) : activePage === 'privacy' ? (
           <PrivacyPolicyPage />
         ) : activePage === 'cookies-policy' ? (

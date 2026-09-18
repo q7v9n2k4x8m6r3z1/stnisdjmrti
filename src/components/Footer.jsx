@@ -1,6 +1,6 @@
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { Music2, Mail, Shield } from 'lucide-react';
+import { Music2, Shield } from 'lucide-react';
 
 export default function Footer() {
   const navigate = useNavigate();
@@ -17,7 +17,9 @@ export default function Footer() {
   return (
     <footer className="border-t border-white/5 bg-dark-bg/80 backdrop-blur-md mt-auto">
       <div className="max-w-6xl mx-auto px-6 py-10">
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-8 mb-8">
+        {/* Two columns since the contact block was removed; three left an
+            empty third and the remaining two hugging the left edge. */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-8 mb-8">
           {/* Brand */}
           <div className="space-y-3">
             <div className="flex items-center gap-2">
@@ -53,19 +55,6 @@ export default function Footer() {
             </ul>
           </div>
 
-          {/* Contact */}
-          <div>
-            <p className="text-xs font-semibold text-brand-text-tertiary uppercase tracking-widest mb-4 flex items-center gap-2">
-              <Mail className="w-3.5 h-3.5" />
-              {isEs ? 'Contacto' : 'Contact'}
-            </p>
-            <a
-              href="mailto:contacto.tododjs@gmail.com"
-              className="text-sm text-brand-text-tertiary hover:text-white transition-colors duration-150 block"
-            >
-              contacto.tododjs@gmail.com
-            </a>
-          </div>
         </div>
 
         {/* Bottom bar — copyright only. The build credit that sat here was

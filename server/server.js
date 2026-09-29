@@ -36,6 +36,7 @@ import categoryRoutes from './routes/category.js';
 import mashupCategoryRoutes from './routes/mashupCategory.js';
 import contactRoutes from './routes/contact.js';
 import emailRoutes from './routes/email.js';
+import campaignRoutes from './routes/campaign.js';
 import couponRoutes from './routes/coupon.js';
 import mongoose from 'mongoose';
 import { startSubscriptionReconciler } from './services/subscriptionReconciler.js';
@@ -166,6 +167,9 @@ app.use('/api/contact', contactRoutes);
 // Public and unauthenticated — the unsubscribe link is signed, and the person
 // clicking it is reading an email, not signed in.
 app.use('/api/email', emailRoutes);
+// Admin-only throughout. Nothing here can bulk-send yet — create, preview and
+// test only, until suppression and bounce handling are in place.
+app.use('/api/campaigns', campaignRoutes);
 app.use('/api/coupons', couponRoutes);
 
 // Health check.

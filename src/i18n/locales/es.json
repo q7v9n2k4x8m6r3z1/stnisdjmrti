@@ -1003,8 +1003,8 @@
   },
   "campaigns": {
     "title": "Campañas de Email",
-    "subtitle": "Crea, previsualiza y prueba emails promocionales. El envío aún no está activado.",
-    "notice": "Las campañas se pueden escribir, previsualizar y probar. El envío a audiencias reales llegará cuando estén listas la gestión de bajas y el procesamiento de rebotes.",
+    "subtitle": "Crea, previsualiza, prueba y envía emails promocionales.",
+    "notice": "Una campaña debe estar en Lista antes de poder enviarse. El envío se hace en lotes de 50, y se excluye automáticamente a quien se dio de baja, rebotó o marcó como spam.",
     "create": "Nueva campaña",
     "edit": "Editar campaña",
     "empty": "Aún no hay campañas",
@@ -1050,6 +1050,24 @@
     "status_sent": "Enviada",
     "status_paused": "Pausada",
     "deleteTitle": "¿Eliminar esta campaña?",
-    "deleteBody": "La campaña se elimina. Se conservan los registros de emails ya enviados, así que los códigos de descuento ya emitidos siguen funcionando."
+    "deleteBody": "La campaña se elimina. Se conservan los registros de emails ya enviados, así que los códigos de descuento ya emitidos siguen funcionando.",
+    "send": "Enviar lote",
+    "pause": "Pausar",
+    "resume": "Reanudar",
+    "sendNow": "Enviar lote",
+    "confirmSendTitle": "¿Enviar esta campaña?",
+    "peopleMatch": "personas coinciden ahora con esta audiencia",
+    "confirmSendBody": "Esto envía un lote de hasta 50 emails ahora. Se excluye automáticamente a quien se dio de baja, rebotó o marcó como spam. Pulsa de nuevo para continuar con el resto.",
+    "allSent": "Campaña completada",
+    "batchSent": "Lote enviado",
+    "sentCount": "Enviados",
+    "failedCount": "Fallidos",
+    "remainingCount": "Restantes",
+    "badAddresses": "Direcciones que no pueden recibir correo",
+    "moreRemain": "Pulsa Enviar de nuevo para continuar con el siguiente lote.",
+    "noneRemain": "Ya se ha enviado a todas las personas de esta audiencia.",
+    "cannotSend": "no se puede enviar",
+    "canSend": "se puede enviar",
+    "statusHint": "Marcar una campaña como Lista es el paso de aprobación. Nada puede enviarse mientras sea un borrador."
   }
 }

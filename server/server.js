@@ -37,6 +37,7 @@ import mashupCategoryRoutes from './routes/mashupCategory.js';
 import contactRoutes from './routes/contact.js';
 import emailRoutes from './routes/email.js';
 import campaignRoutes from './routes/campaign.js';
+import emailWebhookRoutes from './routes/webhookEmail.js';
 import couponRoutes from './routes/coupon.js';
 import mongoose from 'mongoose';
 import { startSubscriptionReconciler } from './services/subscriptionReconciler.js';
@@ -108,6 +109,7 @@ app.use(cors({
 app.use((req, res, next) => {
   const contentType = req.headers['content-type'] || '';
   if (req.originalUrl === '/api/stripe/webhook' ||
+      req.originalUrl === '/api/webhooks/resend' ||
       contentType.includes('multipart/form-data')) {
     return next();
   }
@@ -170,6 +172,9 @@ app.use('/api/email', emailRoutes);
 // Admin-only throughout. Nothing here can bulk-send yet — create, preview and
 // test only, until suppression and bounce handling are in place.
 app.use('/api/campaigns', campaignRoutes);
+// Public, authenticated by Svix signature. Bounces and complaints land here
+// and populate the suppression list.
+app.use('/api/webhooks', emailWebhookRoutes);
 app.use('/api/coupons', couponRoutes);
 
 // Health check.

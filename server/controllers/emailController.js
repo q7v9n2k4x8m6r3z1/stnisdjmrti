@@ -5,6 +5,7 @@
  * link is the authorisation, and it grants exactly one thing.
  */
 import User from '../models/User.js';
+import Suppression from '../models/Suppression.js';
 import { verifyUnsubscribeToken } from '../utils/unsubscribeToken.js';
 
 /** Minimal self-contained page — no SPA route, no assets, works offline. */
@@ -63,6 +64,16 @@ export const unsubscribe = async (req, res) => {
       );
       console.log(`[email] ${user.email} unsubscribed from promotional email`);
     }
+
+    // Also record the ADDRESS, not just the account.
+    //
+    // The flag on the user is what campaign audience queries read, but it is
+    // lost if the account is deleted and recreated — and the person would
+    // start receiving mail again having explicitly asked not to. The
+    // suppression list is keyed on the address and outlives the account.
+    // Idempotent, so a second click or a mail client prefetching the link
+    // changes nothing.
+    await Suppression.add(user.email, 'unsubscribe', 'via unsubscribe link', userId);
 
     // 200 with a body for a human click; mail clients doing the one-click POST
     // only care about the status.

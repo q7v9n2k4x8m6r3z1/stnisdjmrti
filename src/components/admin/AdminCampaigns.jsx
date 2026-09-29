@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   Mail, Plus, X, Loader, Trash2, Copy, Eye, Send, Users, AlertCircle, FileUp,
+  Play, Pause, CheckCircle,
 } from 'lucide-react';
 import API_URL from '../../config/api';
 
@@ -29,6 +30,8 @@ export default function AdminCampaigns() {
   const [error, setError] = useState('');
   const [editing, setEditing] = useState(null);      // full campaign being edited
   const [confirmDelete, setConfirmDelete] = useState(null);
+  const [confirmSend, setConfirmSend] = useState(null);   // { row, count }
+  const [sendResult, setSendResult] = useState(null);
   const [busyId, setBusyId] = useState(null);
 
   const fetchRows = useCallback(async () => {
@@ -114,6 +117,57 @@ export default function AdminCampaigns() {
     } finally { setBusyId(null); }
   };
 
+  // Never a bare Send button. The count is fetched first and shown in the
+  // confirmation, because "send to 400 people" and "send to 4" deserve
+  // different amounts of thought and the number is not otherwise on screen.
+  const openConfirmSend = async (row) => {
+    setBusyId(row._id);
+    setError('');
+    try {
+      const res = await fetch(`${API}/campaigns/${row._id}/audience`, { headers: authHeaders() });
+      const data = await res.json();
+      setConfirmSend({ row, count: data.success ? data.data.count : null, sample: data.data?.sample || [] });
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  // One batch per click, matching the endpoint. The button reports what
+  // remains, so an admin sends a large audience in visible steps rather than
+  // firing one request that runs for minutes with no way to stop it.
+  const runSend = async (row) => {
+    setBusyId(row._id);
+    setError('');
+    try {
+      const res = await fetch(`${API}/campaigns/${row._id}/send`, { method: 'POST', headers: authHeaders() });
+      const data = await res.json();
+      if (!data.success) { setError(data.message); return; }
+      const d = data.data;
+      setSendResult({
+        name: d.campaign, sent: d.sent, failed: d.failed,
+        remaining: d.remaining, finished: d.finished, invalid: d.invalid || [],
+      });
+      fetchRows();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const setPaused = async (row, paused) => {
+    setBusyId(row._id);
+    try {
+      const res = await fetch(`${API}/campaigns/${row._id}/${paused ? 'pause' : 'resume'}`, {
+        method: 'POST', headers: authHeaders(),
+      });
+      const data = await res.json();
+      if (data.success) fetchRows(); else setError(data.message);
+    } finally { setBusyId(null); }
+  };
+
   const fmtDate = (d) => (d ? new Date(d).toLocaleDateString(i18n.language, { day: 'numeric', month: 'short', year: 'numeric' }) : '—');
 
   return (
@@ -136,12 +190,13 @@ export default function AdminCampaigns() {
         </button>
       </div>
 
-      {/* Stated plainly rather than implied by a missing button: an admin who
-          builds a campaign expecting to send it should learn that now. */}
+      {/* The one rule an admin has to internalise: a draft cannot reach a
+          customer. Everything else about sending is discoverable from the
+          buttons; this is not. */}
       <div className="mb-6 flex items-start gap-2 px-4 py-3 rounded-xl bg-blue-500/10 border border-blue-500/30 text-blue-200 text-sm">
         <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" />
         <span>
-          {t('campaigns.notice', 'Campaigns can be written, previewed and tested. Sending to real audiences arrives once unsubscribe handling and bounce processing are in place.')}
+          {t('campaigns.notice', 'A campaign must be set to Ready before it can be sent. Sending goes out in batches of 50, and anyone who unsubscribed, bounced or reported spam is excluded automatically.')}
         </span>
       </div>
 
@@ -202,6 +257,31 @@ export default function AdminCampaigns() {
                     <td className="px-6 py-4 text-sm text-brand-text-tertiary">{fmtDate(row.createdAt)}</td>
                     <td className="px-6 py-4">
                       <div className="flex items-center gap-1">
+                        {/* Only a campaign marked ready can be sent. A draft
+                            has had no human approval and the server refuses it
+                            anyway — showing the button would just produce an
+                            error an admin has to interpret. */}
+                        {(row.status === 'ready' || row.status === 'sending') && (
+                          <button onClick={() => openConfirmSend(row)} disabled={busyId === row._id}
+                            className="p-2 hover:bg-dark-elevated rounded-lg transition-colors text-green-400 hover:text-green-300 disabled:opacity-40"
+                            title={t('campaigns.send', 'Send batch')}>
+                            <Play className="w-4 h-4" />
+                          </button>
+                        )}
+                        {row.status === 'sending' && (
+                          <button onClick={() => setPaused(row, true)} disabled={busyId === row._id}
+                            className="p-2 hover:bg-dark-elevated rounded-lg transition-colors text-orange-400 hover:text-orange-300 disabled:opacity-40"
+                            title={t('campaigns.pause', 'Pause')}>
+                            <Pause className="w-4 h-4" />
+                          </button>
+                        )}
+                        {row.status === 'paused' && (
+                          <button onClick={() => setPaused(row, false)} disabled={busyId === row._id}
+                            className="p-2 hover:bg-dark-elevated rounded-lg transition-colors text-blue-400 hover:text-blue-300 disabled:opacity-40"
+                            title={t('campaigns.resume', 'Resume')}>
+                            <Play className="w-4 h-4" />
+                          </button>
+                        )}
                         <button onClick={() => openPreview(row._id)} disabled={busyId === row._id}
                           className="p-2 hover:bg-dark-elevated rounded-lg transition-colors text-brand-text-tertiary hover:text-white disabled:opacity-40"
                           title={t('campaigns.preview', 'Preview')}>
@@ -238,6 +318,105 @@ export default function AdminCampaigns() {
           onClose={() => setEditing(null)}
           onSave={handleSave}
         />
+      )}
+
+      {confirmSend && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
+          <div className="bg-dark-surface rounded-2xl border border-white/10 p-6 sm:p-8 max-w-md w-full">
+            <div className="flex items-center gap-3 mb-5">
+              <div className="w-10 h-10 rounded-full bg-green-500/10 border border-green-500/30 flex items-center justify-center flex-shrink-0">
+                <Send className="w-5 h-5 text-green-400" />
+              </div>
+              <div className="min-w-0">
+                <h3 className="text-lg font-bold text-white">{t('campaigns.confirmSendTitle', 'Send this campaign?')}</h3>
+                <p className="text-sm text-brand-text-tertiary truncate">{confirmSend.row.name}</p>
+              </div>
+            </div>
+
+            <div className="bg-dark-elevated rounded-xl p-4 mb-5 border border-white/10">
+              <div className="text-3xl font-bold text-white">
+                {confirmSend.count ?? '—'}
+              </div>
+              <p className="text-xs text-brand-text-tertiary mt-1">
+                {t('campaigns.peopleMatch', 'people currently match this audience')}
+              </p>
+              {confirmSend.sample?.length > 0 && (
+                <p className="text-[10px] text-brand-text-tertiary mt-2 truncate">
+                  {confirmSend.sample.slice(0, 3).join(', ')}…
+                </p>
+              )}
+            </div>
+
+            <p className="text-sm text-brand-text-tertiary mb-6">
+              {t('campaigns.confirmSendBody', 'This sends one batch of up to 50 emails now. Anyone who unsubscribed, bounced or reported spam is excluded automatically. Press again to continue through the rest.')}
+            </p>
+
+            <div className="flex gap-3">
+              <button onClick={() => setConfirmSend(null)}
+                className="flex-1 px-4 py-2.5 rounded-lg bg-dark-elevated hover:bg-dark-surface border border-white/10 text-white font-medium transition-colors">
+                {t('common.cancel')}
+              </button>
+              <button
+                onClick={() => { const r = confirmSend.row; setConfirmSend(null); runSend(r); }}
+                disabled={!confirmSend.count}
+                className="flex-1 px-4 py-2.5 rounded-lg bg-green-600 hover:bg-green-700 text-white font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
+                {t('campaigns.sendNow', 'Send batch')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {sendResult && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
+          <div className="bg-dark-surface rounded-2xl border border-white/10 p-6 sm:p-8 max-w-md w-full">
+            <div className="flex items-center gap-3 mb-5">
+              <CheckCircle className="w-6 h-6 text-green-400 flex-shrink-0" />
+              <h3 className="text-lg font-bold text-white">
+                {sendResult.finished
+                  ? t('campaigns.allSent', 'Campaign complete')
+                  : t('campaigns.batchSent', 'Batch sent')}
+              </h3>
+            </div>
+
+            <div className="grid grid-cols-3 gap-3 mb-5">
+              {[
+                { label: t('campaigns.sentCount', 'Sent'), value: sendResult.sent, color: 'text-green-400' },
+                { label: t('campaigns.failedCount', 'Failed'), value: sendResult.failed, color: 'text-red-400' },
+                { label: t('campaigns.remainingCount', 'Remaining'), value: sendResult.remaining, color: 'text-white' },
+              ].map(s => (
+                <div key={s.label} className="bg-dark-elevated rounded-lg p-3 border border-white/10">
+                  <div className={`text-2xl font-bold ${s.color}`}>{s.value}</div>
+                  <p className="text-[10px] text-brand-text-tertiary">{s.label}</p>
+                </div>
+              ))}
+            </div>
+
+            {sendResult.invalid?.length > 0 && (
+              <div className="mb-5 bg-dark-elevated rounded-lg p-3 border border-yellow-500/20 max-h-32 overflow-y-auto">
+                <p className="text-[10px] text-yellow-400 font-semibold mb-1.5 uppercase tracking-wider">
+                  {t('campaigns.badAddresses', 'Addresses that cannot receive mail')}
+                </p>
+                {sendResult.invalid.map((v, i) => (
+                  <p key={i} className="text-[10px] text-brand-text-tertiary">
+                    {v.email} — {v.reason}{v.suggestion ? ` → ${v.suggestion}` : ''}
+                  </p>
+                ))}
+              </div>
+            )}
+
+            <p className="text-xs text-brand-text-tertiary mb-5">
+              {sendResult.remaining > 0
+                ? t('campaigns.moreRemain', 'Press Send again to continue with the next batch.')
+                : t('campaigns.noneRemain', 'Everyone in this audience has now been sent to.')}
+            </p>
+
+            <button onClick={() => setSendResult(null)}
+              className="w-full px-4 py-2.5 rounded-lg bg-accent hover:bg-accent-hover text-white font-medium transition-colors">
+              {t('common.close', 'Close')}
+            </button>
+          </div>
+        </div>
       )}
 
       {confirmDelete && (
@@ -451,6 +630,21 @@ function CampaignEditor({ campaign, onClose, onSave }) {
               </p>
             </div>
           </div>
+
+          {/* Approval. Kept next to the test send on purpose — the intended
+              order is send yourself a test, look at it, then mark it ready. */}
+          {!form.isNew && (
+            <div className="rounded-xl border border-white/10 p-4">
+              <label className={label}>{t('campaigns.status', 'Status')}</label>
+              <select className={field} value={form.status || 'draft'} onChange={e => set('status', e.target.value)}>
+                <option value="draft">{t('campaigns.status_draft', 'Draft')} — {t('campaigns.cannotSend', 'cannot be sent')}</option>
+                <option value="ready">{t('campaigns.status_ready', 'Ready')} — {t('campaigns.canSend', 'can be sent')}</option>
+              </select>
+              <p className="text-[10px] text-brand-text-tertiary mt-1.5">
+                {t('campaigns.statusHint', 'Marking a campaign Ready is the approval step. Nothing can be sent while it is a draft.')}
+              </p>
+            </div>
+          )}
 
           {/* Test send */}
           <div className="rounded-xl border border-white/10 p-4">

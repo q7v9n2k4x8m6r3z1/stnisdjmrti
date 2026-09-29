@@ -15,6 +15,7 @@ import User from '../models/User.js';
 import { sendEmail } from '../services/emailService.js';
 import { buildUnsubscribeUrl } from '../utils/unsubscribeToken.js';
 import { checkEmailAddress } from '../utils/emailAddress.js';
+import { runCampaignPass, buildAudienceQuery } from '../services/campaignSender.js';
 
 /** Fields an admin may set. Anything else in the body is ignored. */
 const EDITABLE = [
@@ -294,6 +295,55 @@ export const testCampaign = async (req, res) => {
   }
 };
 
+// @desc    Send one bounded batch of this campaign
+// @route   POST /api/campaigns/:id/send
+// @access  Private/Admin
+//
+// One batch per call, not "send everything". A pass that tried to mail an
+// entire audience in one request would hold an HTTP connection open for
+// minutes, lose its place on any restart, and give an admin no way to stop it
+// part way. Calling this repeatedly walks the audience, and each call reports
+// how many remain.
+export const sendCampaign = async (req, res) => {
+  try {
+    const report = await runCampaignPass(req.params.id, { dryRun: req.query.dryRun === '1' });
+    res.status(200).json({ success: true, data: report });
+  } catch (error) {
+    // A refusal here is usually the status guard — a draft that has not been
+    // marked ready. That is a message for the admin, not a server fault.
+    const isGuard = /ready|no content|not found/i.test(error.message);
+    console.error('[campaigns] send failed:', error.message);
+    res.status(isGuard ? 400 : 500).json({ success: false, message: error.message });
+  }
+};
+
+// @desc    Stop a send part way, or let it continue
+// @route   POST /api/campaigns/:id/pause  |  /resume
+// @access  Private/Admin
+export const setCampaignPaused = (paused) => async (req, res) => {
+  try {
+    const campaign = await Campaign.findById(req.params.id);
+    if (!campaign) return res.status(404).json({ success: false, message: 'Campaign not found' });
+
+    if (paused && !['sending', 'ready'].includes(campaign.status)) {
+      return res.status(409).json({ success: false, message: `Nothing to pause — campaign is "${campaign.status}"` });
+    }
+    if (!paused && campaign.status !== 'paused') {
+      return res.status(409).json({ success: false, message: `Campaign is "${campaign.status}", not paused` });
+    }
+
+    // The sender re-reads status before every recipient, so a pause takes
+    // effect within one send rather than at the end of the batch.
+    campaign.status = paused ? 'paused' : 'sending';
+    await campaign.save();
+
+    console.log(`[campaigns] "${campaign.name}" ${paused ? 'paused' : 'resumed'} by admin ${req.user._id}`);
+    res.status(200).json({ success: true, data: { status: campaign.status } });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
 // @desc    How many people this campaign would reach, and a sample
 // @route   GET /api/campaigns/:id/audience
 // @access  Private/Admin
@@ -302,44 +352,11 @@ export const previewAudience = async (req, res) => {
     const campaign = await Campaign.findById(req.params.id).lean();
     if (!campaign) return res.status(404).json({ success: false, message: 'Campaign not found' });
 
-    const a = campaign.audience || {};
-    const now = Date.now();
-    const NOT_PAID = { $in: [null, '', 'free'] };
-
-    const query = {
-      role: { $ne: 'admin' },
-      isActive: { $ne: false },
-      isBlocked: { $ne: true },
-      // Never offer an audience that includes people who have opted out. The
-      // count an admin sees has to be the count that could actually be mailed.
-      marketingOptOut: { $ne: true },
-    };
-
-    if (a.minAccountAgeHours) {
-      query.createdAt = { $lte: new Date(now - a.minAccountAgeHours * 3600 * 1000) };
-    }
-    if (a.registeredWithinDays) {
-      query.createdAt = {
-        ...(query.createdAt || {}),
-        $gte: new Date(now - a.registeredWithinDays * 86400 * 1000),
-      };
-    }
-
-    if (a.segment === 'free') {
-      query['subscription.planId'] = NOT_PAID;
-      query['subscription.plan'] = NOT_PAID;
-    } else if (a.segment === 'paid') {
-      query['subscription.status'] = 'active';
-      query['subscription.planId'] = { $nin: [null, '', 'free'] };
-    } else if (a.segment === 'cancelled') {
-      query['subscription.status'] = 'cancelled';
-    }
-
-    if (a.excludeStripeHistory) {
-      query['subscription.stripeCustomerId'] = { $in: [null, ''] };
-      query['subscription.stripeSubscriptionId'] = { $in: [null, ''] };
-      query['subscriptionHistory.0'] = { $exists: false };
-    }
+    // The same function the sender uses, not a second copy of the rules. Two
+    // implementations of "who is in this audience" would drift, and the number
+    // an admin approves has to be the number that actually gets mailed — this
+    // codebase has already paid for that lesson with the access window.
+    const query = buildAudienceQuery(campaign.audience);
 
     const [count, sample] = await Promise.all([
       User.countDocuments(query),

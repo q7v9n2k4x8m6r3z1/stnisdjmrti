@@ -43,6 +43,7 @@ import mongoose from 'mongoose';
 import { startSubscriptionReconciler } from './services/subscriptionReconciler.js';
 import { startAccessDriftMonitor } from './services/accessDriftMonitor.js';
 import { startWelcomeCampaign } from './services/welcomeCampaign.js';
+import { startCampaignAutomation } from './services/campaignScheduler.js';
 import { startTempSweeper } from './utils/tempCleanup.js';
 import { recoverOrphanedJobs } from './services/processingQueue.js';
 
@@ -235,6 +236,9 @@ const server = app.listen(PORT, () => {
   // BIENVENIDA10 win-back email. Off unless WELCOME_CAMPAIGN_ENABLED is
   // explicitly 'true', so a deploy cannot start mailing customers by itself.
   startWelcomeCampaign();
+  // Admin-created automated campaigns. Off unless CAMPAIGN_AUTOMATION_ENABLED
+  // is explicitly 'true', and each campaign must additionally be marked ready.
+  startCampaignAutomation();
   // Remove upload temp files orphaned by a crash or restart (23 GB had
   // accumulated in production). Runs now and every 6h.
   startTempSweeper();

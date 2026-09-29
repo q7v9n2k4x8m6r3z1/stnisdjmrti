@@ -19,6 +19,7 @@
 import stripe from '../config/stripe.js';
 import SubscriptionPlan from '../models/SubscriptionPlan.js';
 import { CAMPAIGN_CODE, isCampaignCodeValidFor } from '../services/welcomeCampaign.js';
+import { checkCampaignDiscount } from '../services/campaignSender.js';
 
 /** Shape a Stripe promotion code + its coupon into one flat row for the admin table. */
 function toAdminRow(promo) {
@@ -314,6 +315,14 @@ export async function resolvePromotionCode(rawCode, { userId = null } = {}) {
   if (code === CAMPAIGN_CODE) {
     const eligible = await isCampaignCodeValidFor(userId);
     if (!eligible.ok) return { ok: false, message: eligible.message };
+  }
+
+  // The same rule for any code an admin-created campaign advertises. Returns
+  // governed:false for an ordinary Stripe code, which passes through
+  // untouched — only codes a campaign actually claims are gated.
+  const campaignRule = await checkCampaignDiscount(code, userId);
+  if (campaignRule.governed && !campaignRule.ok) {
+    return { ok: false, message: campaignRule.message };
   }
 
   // Deliberately NOT filtered by customer.

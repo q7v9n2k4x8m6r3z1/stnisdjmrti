@@ -78,7 +78,79 @@ export function buildAudienceQuery(audience = {}) {
     query['subscriptionHistory.0'] = { $exists: false };
   }
 
+  // Win-back campaigns need a recency bound, or "cancelled" reaches everyone
+  // who ever left — including people who left two years ago and would read a
+  // come-back offer as the platform having lost track of them entirely.
+  if (audience.endedWithinDays) {
+    query['subscription.endDate'] = {
+      $gte: new Date(now - audience.endedWithinDays * 86400 * 1000),
+      $lte: new Date(now),
+    };
+  }
+
   return query;
+}
+
+/**
+ * Is this promotion code usable by this user, given the campaigns that
+ * advertise it?
+ *
+ * The general form of the rule BIENVENIDA10 proved. A shared Stripe promotion
+ * code carries ONE expiry for everyone, so a per-recipient window cannot come
+ * from Stripe — it comes from the send record. A code advertised by a campaign
+ * therefore works only for someone that campaign actually emailed, and only
+ * within the campaign's own window.
+ *
+ * Two consequences worth keeping: the "expires in 24 hours" in an email is
+ * true rather than decorative, and posting the code publicly achieves nothing
+ * because a stranger has no send record.
+ *
+ * @returns {{ governed: false } | { governed: true, ok: boolean, message?: string }}
+ *          governed:false means no campaign claims this code — an ordinary
+ *          Stripe code, which must pass through untouched.
+ */
+export async function checkCampaignDiscount(rawCode, userId) {
+  const code = String(rawCode || '').trim().toUpperCase();
+  if (!code) return { governed: false };
+
+  const campaigns = await Campaign.find({ discountCode: code })
+    .select('_id name discountValidHours')
+    .lean();
+
+  if (!campaigns.length) return { governed: false };
+
+  // A campaign with the window disabled hands the code back to Stripe's own
+  // rules — an admin choosing 0 hours is saying "no per-person limit".
+  if (campaigns.every(c => !c.discountValidHours)) return { governed: false };
+
+  if (!userId) {
+    return { governed: true, ok: false, message: 'Este código no está disponible para tu cuenta' };
+  }
+
+  const rows = await CampaignSend.find({
+    campaign: { $in: campaigns.map(c => String(c._id)) },
+    userId,
+    sentAt: { $ne: null },
+  })
+    .select('campaign sentAt')
+    .lean();
+
+  if (!rows.length) {
+    return { governed: true, ok: false, message: 'Este código no está disponible para tu cuenta' };
+  }
+
+  // Any campaign that still has an open window is enough. If the same code
+  // went out twice, the later send is the one that should count.
+  const byId = new Map(campaigns.map(c => [String(c._id), c]));
+  const open = rows.some((r) => {
+    const hours = byId.get(String(r.campaign))?.discountValidHours;
+    if (!hours) return true;
+    return Date.now() - new Date(r.sentAt).getTime() <= hours * 3600 * 1000;
+  });
+
+  return open
+    ? { governed: true, ok: true }
+    : { governed: true, ok: false, message: 'Este código ha caducado' };
 }
 
 /** Substitute the fixed placeholder set. Mirrors campaignController.render. */

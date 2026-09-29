@@ -1048,6 +1048,13 @@
     "noneRemain": "Everyone in this audience has now been sent to.",
     "cannotSend": "cannot be sent",
     "canSend": "can be sent",
-    "statusHint": "Marking a campaign Ready is the approval step. Nothing can be sent while it is a draft."
+    "statusHint": "Marking a campaign Ready is the approval step. Nothing can be sent while it is a draft.",
+    "endedWithin": "Subscription ended within (days)",
+    "endedWithinHint": "Without this, the campaign reaches everyone who ever left",
+    "automate": "Send automatically as people qualify",
+    "automateHint": "Instead of sending once, this keeps running and reaches each person as they start matching the audience above. Still requires the campaign to be Ready.",
+    "everyHours": "Check every (hours)",
+    "maxPerRun": "Most emails per run",
+    "automated": "Automated"
   }
 }

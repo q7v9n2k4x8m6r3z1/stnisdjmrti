@@ -20,7 +20,7 @@ import { runCampaignPass, buildAudienceQuery } from '../services/campaignSender.
 /** Fields an admin may set. Anything else in the body is ignored. */
 const EDITABLE = [
   'name', 'subject', 'preheader', 'html', 'text',
-  'audience', 'discountCode', 'discountValidHours', 'status',
+  'audience', 'discountCode', 'discountValidHours', 'status', 'automation',
 ];
 
 const SEGMENTS = ['all', 'free', 'paid', 'cancelled'];

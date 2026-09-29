@@ -596,6 +596,18 @@ function CampaignEditor({ campaign, onClose, onSave }) {
                   {t('campaigns.excludeStripe', 'Exclude anyone who reached checkout')}
                 </label>
               </div>
+              {/* Only meaningful for win-backs, so only shown for them —
+                  an unexplained date filter on a welcome campaign is noise. */}
+              {form.audience?.segment === 'cancelled' && (
+                <div>
+                  <label className={label}>{t('campaigns.endedWithin', 'Subscription ended within (days)')}</label>
+                  <input type="number" min="0" className={field} value={form.audience?.endedWithinDays ?? ''}
+                    onChange={e => setAud('endedWithinDays', e.target.value === '' ? null : Number(e.target.value))} />
+                  <p className="text-[10px] text-brand-text-tertiary mt-1">
+                    {t('campaigns.endedWithinHint', 'Without this, the campaign reaches everyone who ever left')}
+                  </p>
+                </div>
+              )}
             </div>
             <div className="flex items-center gap-3">
               <button onClick={checkAudience}
@@ -630,6 +642,38 @@ function CampaignEditor({ campaign, onClose, onSave }) {
               </p>
             </div>
           </div>
+
+          {/* Automation */}
+          {!form.isNew && (
+            <div className="rounded-xl border border-white/10 p-4 space-y-4">
+              <label className="flex items-center gap-2.5 cursor-pointer">
+                <input type="checkbox" checked={!!form.automation?.enabled}
+                  onChange={e => setForm(f => ({ ...f, automation: { ...(f.automation || {}), enabled: e.target.checked } }))}
+                  className="accent-accent w-4 h-4" />
+                <span className="text-sm font-semibold text-white">
+                  {t('campaigns.automate', 'Send automatically as people qualify')}
+                </span>
+              </label>
+              <p className="text-[11px] text-brand-text-tertiary -mt-2">
+                {t('campaigns.automateHint', 'Instead of sending once, this keeps running and reaches each person as they start matching the audience above. Still requires the campaign to be Ready.')}
+              </p>
+
+              {form.automation?.enabled && (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className={label}>{t('campaigns.everyHours', 'Check every (hours)')}</label>
+                    <input type="number" min="1" className={field} value={form.automation?.intervalHours ?? 1}
+                      onChange={e => setForm(f => ({ ...f, automation: { ...(f.automation || {}), intervalHours: Number(e.target.value) } }))} />
+                  </div>
+                  <div>
+                    <label className={label}>{t('campaigns.maxPerRun', 'Most emails per run')}</label>
+                    <input type="number" min="1" className={field} value={form.automation?.maxPerRun ?? 50}
+                      onChange={e => setForm(f => ({ ...f, automation: { ...(f.automation || {}), maxPerRun: Number(e.target.value) } }))} />
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Approval. Kept next to the test send on purpose — the intended
               order is send yourself a test, look at it, then mark it ready. */}

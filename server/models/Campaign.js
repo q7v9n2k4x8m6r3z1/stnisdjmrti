@@ -71,6 +71,27 @@ const campaignSchema = new mongoose.Schema(
       minAccountAgeHours: { type: Number, default: 24 },
       // Exclude anyone who has ever reached Stripe.
       excludeStripeHistory: { type: Boolean, default: true },
+      // For win-back campaigns: only people whose subscription ended within
+      // this many days. Without a bound, a cancelled-segment campaign reaches
+      // everyone who ever left, including people who left two years ago.
+      endedWithinDays: { type: Number, default: null },
+    },
+
+    // ── Automation ───────────────────────────────────────────────────────
+    //
+    // An automated campaign is not a different kind of thing — it is the same
+    // campaign run on a timer instead of when an admin clicks Send. The
+    // audience rules above already express a trigger: "registered at least 24
+    // hours ago, still free, never reached checkout" IS the welcome trigger.
+    // Adding a separate trigger taxonomy would have restated the same
+    // conditions in a second vocabulary.
+    automation: {
+      enabled: { type: Boolean, default: false },
+      // How often the scheduler looks for newly-qualifying people.
+      intervalHours: { type: Number, default: 1 },
+      // Ceiling per run, independent of the batch size. The guard against an
+      // audience rule that matches far more people than intended.
+      maxPerRun: { type: Number, default: 50 },
     },
 
     // ── Offer ────────────────────────────────────────────────────────────

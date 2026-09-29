@@ -1055,6 +1055,24 @@
     "automateHint": "Instead of sending once, this keeps running and reaches each person as they start matching the audience above. Still requires the campaign to be Ready.",
     "everyHours": "Check every (hours)",
     "maxPerRun": "Most emails per run",
-    "automated": "Automated"
+    "automated": "Automated",
+    "tracking": "Tracking",
+    "trackClicks": "Track clicks",
+    "trackClicksHint": "Links pass through this server on the way out. The most reliable number here.",
+    "trackOpens": "Track opens",
+    "trackOpensHint": "Adds an invisible image. Apple Mail loads it whether or not anyone reads the email, so treat open rates as a rough upper bound.",
+    "trackingPrivacy": "Both are tracking and must be disclosed in the privacy policy.",
+    "report": "Results",
+    "opened": "Opened",
+    "clicked": "Clicked",
+    "subscribedCount": "Subscribed",
+    "revenue": "Revenue",
+    "recipient": "Recipient",
+    "delivered": "delivered",
+    "unsubscribed": "unsubscribed",
+    "openCaveat": "Apple Mail loads the image whether or not anyone reads the message. Treat this as an upper bound, not a readership figure.",
+    "noTracking": "Tracking was off for this campaign, so only sends and conversions are known.",
+    "exportCsv": "Export CSV",
+    "exportFailed": "Export failed"
   }
 }

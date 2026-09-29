@@ -11,6 +11,8 @@
  * domain gets burned.
  */
 import Campaign from '../models/Campaign.js';
+import CampaignSend from '../models/CampaignSend.js';
+import SubscriptionPlan from '../models/SubscriptionPlan.js';
 import User from '../models/User.js';
 import { sendEmail } from '../services/emailService.js';
 import { buildUnsubscribeUrl } from '../utils/unsubscribeToken.js';
@@ -340,6 +342,137 @@ export const setCampaignPaused = (paused) => async (req, res) => {
     console.log(`[campaigns] "${campaign.name}" ${paused ? 'paused' : 'resumed'} by admin ${req.user._id}`);
     res.status(200).json({ success: true, data: { status: campaign.status } });
   } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+/**
+ * Per-recipient rows for a campaign, joined to the account.
+ *
+ * Conversion is read from the user's CURRENT subscription rather than written
+ * at subscribe time. That needs no hook in the Stripe webhook path — the most
+ * fragile code in this system and not worth touching for a report — and it
+ * stays correct if someone subscribes through a route nobody thought to
+ * instrument.
+ */
+async function buildReportRows(campaignId) {
+  const sends = await CampaignSend.find({ campaign: String(campaignId) })
+    .sort({ sentAt: -1 })
+    .lean();
+
+  if (!sends.length) return [];
+
+  const users = await User.find({ _id: { $in: sends.map(s => s.userId) } })
+    .select('email name subscription marketingOptOut')
+    .lean();
+  const byId = new Map(users.map(u => [String(u._id), u]));
+
+  const plans = await SubscriptionPlan.find().select('planId price').lean();
+  const priceOf = new Map(plans.map(p => [p.planId, p.price || 0]));
+
+  return sends.map((s) => {
+    const u = byId.get(String(s.userId));
+    const sub = u?.subscription || {};
+    const paid = (v) => v && v !== 'free';
+    const subscribed = !!u && (paid(sub.planId) || paid(sub.plan));
+
+    return {
+      email: s.email,
+      sentAt: s.sentAt,
+      failed: !!s.failedAt,
+      failureReason: s.failureReason || null,
+      opened: !!s.openedAt,
+      openedAt: s.openedAt,
+      openCount: s.openCount || 0,
+      clicked: !!s.clickedAt,
+      clickedAt: s.clickedAt,
+      clickCount: s.clickCount || 0,
+      subscribed,
+      // Only counted when they actually converted, and only at the plan's
+      // list price — this is attribution, not billing, and it deliberately
+      // ignores discounts, proration and refunds rather than pretending to
+      // be a revenue figure it cannot be.
+      planId: subscribed ? (sub.planId || sub.plan || null) : null,
+      planPrice: subscribed ? (priceOf.get(sub.planId) ?? priceOf.get(sub.plan) ?? 0) : 0,
+      optedOut: !!u?.marketingOptOut,
+      accountDeleted: !u,
+    };
+  });
+}
+
+// @desc    Who received this campaign and what happened
+// @route   GET /api/campaigns/:id/report
+// @access  Private/Admin
+export const campaignReport = async (req, res) => {
+  try {
+    const campaign = await Campaign.findById(req.params.id).select('name tracking stats').lean();
+    if (!campaign) return res.status(404).json({ success: false, message: 'Campaign not found' });
+
+    const rows = await buildReportRows(req.params.id);
+    const delivered = rows.filter(r => !r.failed);
+    const converted = delivered.filter(r => r.subscribed);
+    const pct = (n, of) => (of ? Math.round((n / of) * 1000) / 10 : 0);
+
+    res.status(200).json({
+      success: true,
+      data: {
+        campaign: campaign.name,
+        tracking: campaign.tracking || { opens: false, clicks: false },
+        totals: {
+          sent: delivered.length,
+          failed: rows.length - delivered.length,
+          opened: delivered.filter(r => r.opened).length,
+          clicked: delivered.filter(r => r.clicked).length,
+          subscribed: converted.length,
+          optedOut: rows.filter(r => r.optedOut).length,
+          openRate: pct(delivered.filter(r => r.opened).length, delivered.length),
+          clickRate: pct(delivered.filter(r => r.clicked).length, delivered.length),
+          conversionRate: pct(converted.length, delivered.length),
+          attributedRevenue:
+            Math.round(converted.reduce((sum, r) => sum + (r.planPrice || 0), 0) * 100) / 100,
+        },
+        rows,
+      },
+    });
+  } catch (error) {
+    console.error('[campaigns] report failed:', error.message);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// @desc    The same report as CSV
+// @route   GET /api/campaigns/:id/report.csv
+// @access  Private/Admin
+export const campaignReportCsv = async (req, res) => {
+  try {
+    const campaign = await Campaign.findById(req.params.id).select('name').lean();
+    if (!campaign) return res.status(404).json({ success: false, message: 'Campaign not found' });
+
+    const rows = await buildReportRows(req.params.id);
+
+    const esc = (v) => {
+      const s = v === null || v === undefined ? '' : String(v);
+      return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+    };
+    const iso = (d) => (d ? new Date(d).toISOString() : '');
+
+    const header = ['Email', 'Sent', 'Failed', 'Failure reason', 'Opened', 'Opens', 'Clicked', 'Clicks', 'Subscribed', 'Plan', 'Plan price', 'Opted out'];
+    const lines = rows.map(r => [
+      r.email, iso(r.sentAt), r.failed ? 'yes' : 'no', r.failureReason,
+      r.opened ? iso(r.openedAt) : '', r.openCount,
+      r.clicked ? iso(r.clickedAt) : '', r.clickCount,
+      r.subscribed ? 'yes' : 'no', r.planId, r.planPrice || '',
+      r.optedOut ? 'yes' : 'no',
+    ].map(esc).join(','));
+
+    const safeName = String(campaign.name).replace(/[^a-z0-9]+/gi, '-').toLowerCase();
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="campaign-${safeName}-${new Date().toISOString().slice(0, 10)}.csv"`);
+    // CRLF and a BOM: Excel misreads UTF-8 without one, and Spanish accents
+    // in a name arrive mangled.
+    res.status(200).send('﻿' + [header.join(','), ...lines].join('\r\n'));
+  } catch (error) {
+    console.error('[campaigns] csv export failed:', error.message);
     res.status(500).json({ success: false, message: error.message });
   }
 };

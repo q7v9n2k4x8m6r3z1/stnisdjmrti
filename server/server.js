@@ -38,6 +38,7 @@ import contactRoutes from './routes/contact.js';
 import emailRoutes from './routes/email.js';
 import campaignRoutes from './routes/campaign.js';
 import emailWebhookRoutes from './routes/webhookEmail.js';
+import trackingRoutes from './routes/tracking.js';
 import couponRoutes from './routes/coupon.js';
 import mongoose from 'mongoose';
 import { startSubscriptionReconciler } from './services/subscriptionReconciler.js';
@@ -176,6 +177,9 @@ app.use('/api/campaigns', campaignRoutes);
 // Public, authenticated by Svix signature. Bounces and complaints land here
 // and populate the suppression list.
 app.use('/api/webhooks', emailWebhookRoutes);
+// Open pixel and click redirects. Public — requested by mail clients with no
+// session — and authenticated by the signed token in the path.
+app.use('/api/track', trackingRoutes);
 app.use('/api/coupons', couponRoutes);
 
 // Health check.

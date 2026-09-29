@@ -11,6 +11,8 @@ import {
   previewAudience,
   sendCampaign,
   setCampaignPaused,
+  campaignReport,
+  campaignReportCsv,
 } from '../controllers/campaignController.js';
 import { protect, authorize } from '../middleware/auth.js';
 
@@ -34,6 +36,10 @@ router.post('/:id/duplicate', duplicateCampaign);
 // writes anything or contacts a recipient.
 router.get('/:id/preview', previewCampaign);
 router.get('/:id/audience', previewAudience);
+router.get('/:id/report', campaignReport);
+// Declared before the generic /:id routes would matter if this were a param,
+// but it is a distinct path so order is not load-bearing here.
+router.get('/:id/report.csv', campaignReportCsv);
 
 // Sends to one named address only. No send record, no recipient consumed.
 router.post('/:id/test', testCampaign);

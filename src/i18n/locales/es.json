@@ -1075,6 +1075,24 @@
     "automateHint": "En vez de enviarse una vez, sigue funcionando y llega a cada persona cuando empieza a coincidir con la audiencia de arriba. Sigue requiriendo que la campaña esté Lista.",
     "everyHours": "Comprobar cada (horas)",
     "maxPerRun": "Máximo de emails por ejecución",
-    "automated": "Automática"
+    "automated": "Automática",
+    "tracking": "Seguimiento",
+    "trackClicks": "Medir clics",
+    "trackClicksHint": "Los enlaces pasan por este servidor al salir. El dato más fiable de aquí.",
+    "trackOpens": "Medir aperturas",
+    "trackOpensHint": "Añade una imagen invisible. Apple Mail la carga lea alguien el email o no, así que trata la tasa de apertura como un máximo aproximado.",
+    "trackingPrivacy": "Ambos son seguimiento y deben figurar en la política de privacidad.",
+    "report": "Resultados",
+    "opened": "Aperturas",
+    "clicked": "Clics",
+    "subscribedCount": "Suscritos",
+    "revenue": "Ingresos",
+    "recipient": "Destinatario",
+    "delivered": "entregado",
+    "unsubscribed": "dado de baja",
+    "openCaveat": "Apple Mail carga la imagen lea alguien el mensaje o no. Tómalo como un máximo, no como lectores reales.",
+    "noTracking": "El seguimiento estaba desactivado en esta campaña, así que solo se conocen los envíos y las conversiones.",
+    "exportCsv": "Exportar CSV",
+    "exportFailed": "Error al exportar"
   }
 }

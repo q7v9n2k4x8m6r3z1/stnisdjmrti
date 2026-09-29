@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   Mail, Plus, X, Loader, Trash2, Copy, Eye, Send, Users, AlertCircle, FileUp,
-  Play, Pause, CheckCircle,
+  Play, Pause, CheckCircle, BarChart3, Download,
 } from 'lucide-react';
 import API_URL from '../../config/api';
 
@@ -32,6 +32,7 @@ export default function AdminCampaigns() {
   const [confirmDelete, setConfirmDelete] = useState(null);
   const [confirmSend, setConfirmSend] = useState(null);   // { row, count }
   const [sendResult, setSendResult] = useState(null);
+  const [report, setReport] = useState(null);
   const [busyId, setBusyId] = useState(null);
 
   const fetchRows = useCallback(async () => {
@@ -155,6 +156,35 @@ export default function AdminCampaigns() {
     } finally {
       setBusyId(null);
     }
+  };
+
+  const openReport = async (row) => {
+    setBusyId(row._id);
+    setError('');
+    try {
+      const res = await fetch(`${API}/campaigns/${row._id}/report`, { headers: authHeaders() });
+      const data = await res.json();
+      if (data.success) setReport({ ...data.data, id: row._id });
+      else setError(data.message);
+    } catch (err) {
+      setError(err.message);
+    } finally { setBusyId(null); }
+  };
+
+  // Fetched then turned into a blob rather than linked directly: the endpoint
+  // needs the bearer token, and a plain <a> would arrive unauthenticated.
+  const downloadCsv = async (id, name) => {
+    const res = await fetch(`${API}/campaigns/${id}/report.csv`, { headers: authHeaders() });
+    if (!res.ok) { setError(t('campaigns.exportFailed', 'Export failed')); return; }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `campaign-${String(name).replace(/[^a-z0-9]+/gi, '-').toLowerCase()}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 30000);
   };
 
   const setPaused = async (row, paused) => {
@@ -282,6 +312,13 @@ export default function AdminCampaigns() {
                             <Play className="w-4 h-4" />
                           </button>
                         )}
+                        {(row.stats?.sent > 0 || row.status === 'sent' || row.status === 'sending') && (
+                          <button onClick={() => openReport(row)} disabled={busyId === row._id}
+                            className="p-2 hover:bg-dark-elevated rounded-lg transition-colors text-brand-text-tertiary hover:text-white disabled:opacity-40"
+                            title={t('campaigns.report', 'Results')}>
+                            <BarChart3 className="w-4 h-4" />
+                          </button>
+                        )}
                         <button onClick={() => openPreview(row._id)} disabled={busyId === row._id}
                           className="p-2 hover:bg-dark-elevated rounded-lg transition-colors text-brand-text-tertiary hover:text-white disabled:opacity-40"
                           title={t('campaigns.preview', 'Preview')}>
@@ -318,6 +355,93 @@ export default function AdminCampaigns() {
           onClose={() => setEditing(null)}
           onSave={handleSave}
         />
+      )}
+
+      {report && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
+          <div className="bg-dark-surface rounded-2xl border border-white/10 p-5 sm:p-8 max-w-2xl w-full max-h-[92vh] overflow-y-auto">
+            <div className="flex items-start justify-between gap-3 mb-6">
+              <div className="min-w-0">
+                <h3 className="text-xl font-bold text-white truncate">{report.campaign}</h3>
+                <p className="text-sm text-brand-text-tertiary">{t('campaigns.report', 'Results')}</p>
+              </div>
+              <button onClick={() => setReport(null)} className="p-2 hover:bg-white/10 rounded-lg transition-colors flex-shrink-0">
+                <X className="w-5 h-5 text-white" />
+              </button>
+            </div>
+
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
+              {[
+                { label: t('campaigns.sentCount', 'Sent'), value: report.totals.sent },
+                { label: t('campaigns.clicked', 'Clicked'), value: `${report.totals.clicked} · ${report.totals.clickRate}%`, dim: !report.tracking.clicks },
+                { label: t('campaigns.subscribedCount', 'Subscribed'), value: `${report.totals.subscribed} · ${report.totals.conversionRate}%`, good: true },
+                { label: t('campaigns.revenue', 'Revenue'), value: `€${report.totals.attributedRevenue}`, good: true },
+              ].map(s => (
+                <div key={s.label} className={`bg-dark-elevated rounded-lg p-3 border border-white/10 ${s.dim ? 'opacity-40' : ''}`}>
+                  <div className={`text-xl font-bold ${s.good ? 'text-green-400' : 'text-white'}`}>{s.value}</div>
+                  <p className="text-[10px] text-brand-text-tertiary">{s.label}</p>
+                </div>
+              ))}
+            </div>
+
+            {/* Opens are shown apart from the rest and qualified, rather than
+                sitting beside clicks as though equally trustworthy. */}
+            {report.tracking.opens && (
+              <div className="mb-6 px-4 py-3 rounded-xl bg-dark-elevated border border-white/10">
+                <div className="flex items-baseline justify-between">
+                  <span className="text-sm text-white">
+                    {t('campaigns.opened', 'Opened')}: <strong>{report.totals.opened}</strong> · {report.totals.openRate}%
+                  </span>
+                </div>
+                <p className="text-[10px] text-yellow-400/80 mt-1">
+                  {t('campaigns.openCaveat', 'Apple Mail loads the image whether or not anyone reads the message. Treat this as an upper bound, not a readership figure.')}
+                </p>
+              </div>
+            )}
+
+            {!report.tracking.clicks && !report.tracking.opens && (
+              <p className="mb-6 text-xs text-brand-text-tertiary">
+                {t('campaigns.noTracking', 'Tracking was off for this campaign, so only sends and conversions are known.')}
+              </p>
+            )}
+
+            <div className="rounded-xl border border-white/10 overflow-hidden mb-5">
+              <div className="overflow-x-auto max-h-64">
+                <table className="w-full min-w-[560px] text-xs">
+                  <thead className="bg-dark-elevated sticky top-0">
+                    <tr>
+                      {[t('campaigns.recipient', 'Recipient'), t('campaigns.clicked', 'Clicked'), t('campaigns.subscribedCount', 'Subscribed'), t('campaigns.status', 'Status')].map(h => (
+                        <th key={h} className="text-left px-3 py-2 font-semibold text-brand-text-tertiary uppercase tracking-wider">{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-white/5">
+                    {report.rows.slice(0, 200).map((r, i) => (
+                      <tr key={i}>
+                        <td className="px-3 py-2 text-white truncate max-w-[200px]">{r.email}</td>
+                        <td className="px-3 py-2 text-brand-text-tertiary">{r.clicked ? `${r.clickCount}×` : '—'}</td>
+                        <td className="px-3 py-2">{r.subscribed
+                          ? <span className="text-green-400">✓ {r.planId || ''}</span>
+                          : <span className="text-brand-text-tertiary">—</span>}</td>
+                        <td className="px-3 py-2 text-brand-text-tertiary">
+                          {r.failed ? <span className="text-red-400">{r.failureReason || 'failed'}</span>
+                            : r.optedOut ? t('campaigns.unsubscribed', 'unsubscribed')
+                            : t('campaigns.delivered', 'delivered')}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <button onClick={() => downloadCsv(report.id, report.campaign)}
+              className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg bg-dark-elevated hover:bg-white/10 border border-white/10 text-white font-medium transition-colors">
+              <Download className="w-4 h-4" />
+              {t('campaigns.exportCsv', 'Export CSV')}
+            </button>
+          </div>
+        </div>
       )}
 
       {confirmSend && (
@@ -642,6 +766,41 @@ function CampaignEditor({ campaign, onClose, onSave }) {
               </p>
             </div>
           </div>
+
+          {/* Tracking */}
+          {!form.isNew && (
+            <div className="rounded-xl border border-white/10 p-4 space-y-3">
+              <div className="flex items-center gap-2 text-sm font-semibold text-white">
+                <BarChart3 className="w-4 h-4 text-accent" />
+                {t('campaigns.tracking', 'Tracking')}
+              </div>
+              <label className="flex items-start gap-2.5 cursor-pointer">
+                <input type="checkbox" checked={!!form.tracking?.clicks}
+                  onChange={e => setForm(f => ({ ...f, tracking: { ...(f.tracking || {}), clicks: e.target.checked } }))}
+                  className="accent-accent w-4 h-4 mt-0.5" />
+                <span className="text-sm text-white">
+                  {t('campaigns.trackClicks', 'Track clicks')}
+                  <span className="block text-[10px] text-brand-text-tertiary">
+                    {t('campaigns.trackClicksHint', 'Links pass through this server on the way out. The most reliable number here.')}
+                  </span>
+                </span>
+              </label>
+              <label className="flex items-start gap-2.5 cursor-pointer">
+                <input type="checkbox" checked={!!form.tracking?.opens}
+                  onChange={e => setForm(f => ({ ...f, tracking: { ...(f.tracking || {}), opens: e.target.checked } }))}
+                  className="accent-accent w-4 h-4 mt-0.5" />
+                <span className="text-sm text-white">
+                  {t('campaigns.trackOpens', 'Track opens')}
+                  <span className="block text-[10px] text-brand-text-tertiary">
+                    {t('campaigns.trackOpensHint', 'Adds an invisible image. Apple Mail loads it whether or not anyone reads the email, so treat open rates as a rough upper bound.')}
+                  </span>
+                </span>
+              </label>
+              <p className="text-[10px] text-yellow-400/80">
+                {t('campaigns.trackingPrivacy', 'Both are tracking and must be disclosed in the privacy policy.')}
+              </p>
+            </div>
+          )}
 
           {/* Automation */}
           {!form.isNew && (

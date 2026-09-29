@@ -111,6 +111,18 @@ const campaignSchema = new mongoose.Schema(
       default: 24,
     },
 
+    // ── Tracking ─────────────────────────────────────────────────────────
+    //
+    // Off by default, and per campaign. Both of these are genuinely tracking:
+    // opens need an invisible image, clicks need every link rewritten through
+    // this server. That belongs in the privacy policy, and switching it on
+    // should be a decision rather than something inherited silently by every
+    // campaign because the first one had it enabled.
+    tracking: {
+      opens: { type: Boolean, default: false },
+      clicks: { type: Boolean, default: false },
+    },
+
     // ── State ────────────────────────────────────────────────────────────
     // draft    — being written, cannot send
     // ready    — approved to send, still requires an explicit start

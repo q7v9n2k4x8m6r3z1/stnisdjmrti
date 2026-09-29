@@ -72,6 +72,22 @@ const campaignSendSchema = new mongoose.Schema(
       type: String,
       default: null,
     },
+    // ── Engagement ───────────────────────────────────────────────────────
+    //
+    // Recorded here rather than in a separate events collection: this row is
+    // already the per-recipient record, and one row per person beats one row
+    // per open for both storage and the queries a report actually runs.
+    //
+    // Opens are the weakest number in the system and are labelled as such
+    // wherever they are shown. Apple Mail Privacy Protection pre-fetches
+    // remote images for every message whether or not anyone looks at it, so a
+    // large share of "opens" are a proxy server, not a person. Clicks and
+    // conversions are the figures worth acting on.
+    openedAt: { type: Date, default: null },
+    openCount: { type: Number, default: 0 },
+    clickedAt: { type: Date, default: null },
+    clickCount: { type: Number, default: 0 },
+
     // True when the address itself is the problem and retrying cannot help —
     // a malformed address, or a well-known provider typo such as gmail.con.
     // Kept distinct from a transient failure so the report can show the admin

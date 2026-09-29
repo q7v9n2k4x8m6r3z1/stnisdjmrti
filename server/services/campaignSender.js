@@ -23,6 +23,7 @@ import User from '../models/User.js';
 import { sendEmail } from './emailService.js';
 import { buildUnsubscribeUrl } from '../utils/unsubscribeToken.js';
 import { checkEmailAddress } from '../utils/emailAddress.js';
+import { makeTrackingToken } from '../utils/trackingToken.js';
 
 /** Most recipients touched by a single pass. */
 const MAX_PER_PASS = 50;
@@ -153,6 +154,45 @@ export async function checkCampaignDiscount(rawCode, userId) {
     : { governed: true, ok: false, message: 'Este código ha caducado' };
 }
 
+const trackingBase = () =>
+  (process.env.API_PUBLIC_URL || 'https://api.tododjs.com').replace(/\/+$/, '');
+
+/**
+ * Point every http(s) link through the click tracker.
+ *
+ * The unsubscribe URL is deliberately left alone. It is a legal requirement,
+ * it has to work even if tracking is misconfigured or the endpoint is down,
+ * and routing an opt-out through an engagement tracker is the wrong thing to
+ * do to someone who has just asked to be left alone.
+ *
+ * mailto:, tel: and anchors are skipped — there is nothing to redirect to.
+ */
+export function rewriteLinks(html, campaignId, userId, unsubscribeUrl) {
+  return String(html || '').replace(
+    /href\s*=\s*(["'])(.*?)\1/gi,
+    (match, quote, url) => {
+      const target = String(url).trim();
+      if (!/^https?:\/\//i.test(target)) return match;
+      if (target === unsubscribeUrl) return match;
+
+      const token = makeTrackingToken({ campaignId, userId, destination: target });
+      return `href=${quote}${trackingBase()}/api/track/c/${token}${quote}`;
+    }
+  );
+}
+
+/**
+ * Append the open pixel.
+ *
+ * Before </body> when there is one so it lands inside the document rather than
+ * after it, which some clients strip.
+ */
+function addOpenPixel(html, campaignId, userId) {
+  const token = makeTrackingToken({ campaignId, userId });
+  const img = `<img src="${trackingBase()}/api/track/o/${token}" width="1" height="1" alt="" style="display:block;border:0;width:1px;height:1px" />`;
+  return /<\/body>/i.test(html) ? html.replace(/<\/body>/i, `${img}</body>`) : html + img;
+}
+
 /** Substitute the fixed placeholder set. Mirrors campaignController.render. */
 function render(campaign, user) {
   const unsubscribeUrl = buildUnsubscribeUrl(user._id);
@@ -162,9 +202,23 @@ function render(campaign, user) {
       .split('{{preheader}}').join(campaign.preheader || '')
       .split('{{name}}').join(user.name || user.email || '');
 
+  let html = apply(campaign.html);
+
+  // Applied after substitution so the unsubscribe URL is a real URL by the
+  // time rewriteLinks is deciding what to leave alone.
+  if (campaign.tracking?.clicks) {
+    html = rewriteLinks(html, String(campaign._id), String(user._id), unsubscribeUrl);
+  }
+  if (campaign.tracking?.opens) {
+    html = addOpenPixel(html, String(campaign._id), String(user._id));
+  }
+
   return {
     subject: apply(campaign.subject),
-    html: apply(campaign.html),
+    html,
+    // The plain-text part is never rewritten. A tracking URL in text is
+    // unreadable, unmistakably a tracker, and the usual reason a message gets
+    // marked as spam by a person reading it.
     text: apply(campaign.text),
     unsubscribeUrl,
   };

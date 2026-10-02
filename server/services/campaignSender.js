@@ -265,6 +265,93 @@ async function nextBatch(campaign) {
 }
 
 /**
+ * Deliver one campaign to one person, with all the guarantees intact.
+ *
+ * Extracted so the batch sender and the sequence engine share one
+ * implementation. Two copies of "claim, send, record" would drift, and the
+ * properties this carries — a claim that makes double-sending impossible, a
+ * sentAt stamped only on success, a transient failure left retriable — are
+ * exactly the ones that are easy to get subtly wrong the second time.
+ *
+ * Does NOT check suppression or the audience. Both callers do that against a
+ * batch, which is one query instead of one per recipient.
+ *
+ * @returns {'sent'|'skipped'|'failed'|'invalid'}
+ */
+export async function deliverToUser(campaign, user) {
+  const campaignKey = String(campaign._id);
+
+  const address = checkEmailAddress(user.email);
+  if (!address.ok) {
+    await CampaignSend.updateOne(
+      { campaign: campaignKey, userId: user._id },
+      {
+        $setOnInsert: { email: user.email, claimedAt: new Date() },
+        $set: {
+          failedAt: new Date(), failureReason: address.reason,
+          permanentFailure: true, lastAttemptAt: new Date(),
+        },
+      },
+      { upsert: true }
+    ).catch(e => console.error(`[campaign-send] could not record invalid ${user.email}: ${e.message}`));
+    return 'invalid';
+  }
+
+  // Claim before sending. A duplicate key means someone else already has this
+  // recipient — what makes double-sending impossible rather than unlikely.
+  const now = new Date();
+  try {
+    await CampaignSend.create({
+      campaign: campaignKey, userId: user._id, email: user.email,
+      attempts: 1, lastAttemptAt: now,
+    });
+  } catch (err) {
+    if (err?.code !== 11000) {
+      console.error(`[campaign-send] could not claim ${user.email}: ${err.message}`);
+      return 'failed';
+    }
+    const retry = await CampaignSend.findOneAndUpdate(
+      {
+        campaign: campaignKey, userId: user._id, sentAt: null,
+        permanentFailure: { $ne: true }, attempts: { $lt: MAX_ATTEMPTS },
+      },
+      { $inc: { attempts: 1 }, $set: { lastAttemptAt: now } },
+      { new: true }
+    );
+    if (!retry) return 'skipped';
+  }
+
+  const { subject, html, text, unsubscribeUrl } = render(campaign, user);
+  const result = await sendEmail({
+    to: user.email,
+    subject, html, text,
+    headers: {
+      'List-Unsubscribe': `<${unsubscribeUrl}>`,
+      'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click',
+    },
+  });
+
+  if (result?.success === false) {
+    // Left retriable: a rate limit or a momentary fault must not remove
+    // someone from the campaign for good.
+    await CampaignSend.updateOne(
+      { campaign: campaignKey, userId: user._id },
+      { $set: { failedAt: new Date(), failureReason: String(result.error?.message || 'send failed').slice(0, 300) } }
+    );
+    return 'failed';
+  }
+
+  // sentAt stamped on success, never at claim time — any per-recipient
+  // discount window is measured from here, and a retried send would otherwise
+  // arrive with part of its window already gone.
+  await CampaignSend.updateOne(
+    { campaign: campaignKey, userId: user._id },
+    { $set: { sentAt: new Date(), failedAt: null, failureReason: null } }
+  );
+  return 'sent';
+}
+
+/**
  * Send one bounded batch of a campaign.
  *
  * @param {string} campaignId
@@ -323,81 +410,23 @@ export async function runCampaignPass(campaignId, { dryRun = false } = {}) {
       break;
     }
 
-    const address = checkEmailAddress(user.email);
-    if (!address.ok) {
-      report.invalid.push({ email: user.email, reason: address.reason, suggestion: address.suggestion || null });
-      await CampaignSend.updateOne(
-        { campaign: campaignKey, userId: user._id },
-        {
-          $setOnInsert: { email: user.email, claimedAt: new Date() },
-          $set: {
-            failedAt: new Date(), failureReason: address.reason,
-            permanentFailure: true, lastAttemptAt: new Date(),
-          },
-        },
-        { upsert: true }
-      ).catch(e => console.error(`[campaign-send] could not record invalid ${user.email}: ${e.message}`));
-      continue;
-    }
+    // Pace before the send, not after the claim, so a skipped or invalid
+    // recipient costs nothing.
+    if (sendIndex > 0) await sleep(SEND_INTERVAL_MS);
+    sendIndex++;
 
-    // Claim before sending. A duplicate key means someone else has this
-    // recipient, which is what makes double-sending impossible rather than
-    // merely unlikely.
-    const now = new Date();
-    try {
-      await CampaignSend.create({
-        campaign: campaignKey, userId: user._id, email: user.email,
-        attempts: 1, lastAttemptAt: now,
-      });
-    } catch (err) {
-      if (err?.code !== 11000) {
-        console.error(`[campaign-send] could not claim ${user.email}: ${err.message}`);
-        report.failed++;
-        continue;
-      }
-      const retry = await CampaignSend.findOneAndUpdate(
-        {
-          campaign: campaignKey, userId: user._id, sentAt: null,
-          permanentFailure: { $ne: true }, attempts: { $lt: MAX_ATTEMPTS },
-        },
-        { $inc: { attempts: 1 }, $set: { lastAttemptAt: now } },
-        { new: true }
-      );
-      if (!retry) { report.skipped++; continue; }
-    }
-
-    if (sendIndex++ > 0) await sleep(SEND_INTERVAL_MS);
-
-    const { subject, html, text, unsubscribeUrl } = render(campaign, user);
-    const result = await sendEmail({
-      to: user.email,
-      subject, html, text,
-      headers: {
-        'List-Unsubscribe': `<${unsubscribeUrl}>`,
-        'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click',
-      },
-    });
-
-    if (result?.success === false) {
-      // Left retriable: a rate limit or a momentary fault must not remove
-      // someone from the campaign for good.
-      await CampaignSend.updateOne(
-        { campaign: campaignKey, userId: user._id },
-        { $set: { failedAt: new Date(), failureReason: String(result.error?.message || 'send failed').slice(0, 300) } }
-      );
+    const outcome = await deliverToUser(campaign, user);
+    if (outcome === 'sent') {
+      report.sent++;
+      report.recipients.push(user.email);
+    } else if (outcome === 'failed') {
       report.failed++;
-      continue;
+    } else if (outcome === 'skipped') {
+      report.skipped++;
+    } else if (outcome === 'invalid') {
+      const a = checkEmailAddress(user.email);
+      report.invalid.push({ email: user.email, reason: a.reason, suggestion: a.suggestion || null });
     }
-
-    // sentAt stamped on success, never at claim time — any per-recipient
-    // discount window is measured from here, and a retried send would
-    // otherwise arrive with part of its window already gone.
-    await CampaignSend.updateOne(
-      { campaign: campaignKey, userId: user._id },
-      { $set: { sentAt: new Date(), failedAt: null, failureReason: null } }
-    );
-    report.sent++;
-    report.recipients.push(user.email);
   }
 
   await Campaign.updateOne(

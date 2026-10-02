@@ -21,7 +21,8 @@ import {
   Tag,
   Music2,
   Ticket,
-  Mail
+  Mail,
+  GitBranch
 } from 'lucide-react';
 import AdminOverview from './AdminOverview';
 import AdminTracks from './AdminTracks';
@@ -43,6 +44,7 @@ import AdminMashupCategories from './AdminMashupCategories';
 import AdminUserDevices from './AdminUserDevices';
 import AdminCoupons from './AdminCoupons';
 import AdminCampaigns from './AdminCampaigns';
+import AdminSequences from './AdminSequences';
 import ErrorBoundary from '../ErrorBoundary';
 import API_URL from '../../config/api';
 
@@ -117,6 +119,7 @@ export default function AdminDashboard({ onClose, user, onUserUpdate }) {
     { id: 'subscriptions', label: t('admin.subscriptions'), icon: CreditCard },
     { id: 'coupons', label: t('coupons.title', 'Discount Codes'), icon: Ticket },
     { id: 'campaigns', label: t('campaigns.title', 'Email Campaigns'), icon: Mail },
+    { id: 'sequences', label: t('sequences.title', 'Email Sequences'), icon: GitBranch },
     { id: 'analytics', label: t('admin.analytics'), icon: Database },
     { id: 'categories', label: t('admin.categories'), icon: Tag },
     { id: 'mashupCategories', label: 'Mashup Categories', icon: Music2 },
@@ -161,6 +164,8 @@ export default function AdminDashboard({ onClose, user, onUserUpdate }) {
         return <AdminCoupons />;
       case 'campaigns':
         return <AdminCampaigns />;
+      case 'sequences':
+        return <AdminSequences />;
       case 'analytics':
         return <AdminAnalytics />;
       case 'pools':

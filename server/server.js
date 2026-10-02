@@ -39,12 +39,14 @@ import emailRoutes from './routes/email.js';
 import campaignRoutes from './routes/campaign.js';
 import emailWebhookRoutes from './routes/webhookEmail.js';
 import trackingRoutes from './routes/tracking.js';
+import sequenceRoutes from './routes/sequence.js';
 import couponRoutes from './routes/coupon.js';
 import mongoose from 'mongoose';
 import { startSubscriptionReconciler } from './services/subscriptionReconciler.js';
 import { startAccessDriftMonitor } from './services/accessDriftMonitor.js';
 import { startWelcomeCampaign } from './services/welcomeCampaign.js';
 import { startCampaignAutomation } from './services/campaignScheduler.js';
+import { startSequenceEngine } from './services/sequenceEngine.js';
 import { startTempSweeper } from './utils/tempCleanup.js';
 import { recoverOrphanedJobs } from './services/processingQueue.js';
 
@@ -180,6 +182,7 @@ app.use('/api/webhooks', emailWebhookRoutes);
 // Open pixel and click redirects. Public — requested by mail clients with no
 // session — and authenticated by the signed token in the path.
 app.use('/api/track', trackingRoutes);
+app.use('/api/sequences', sequenceRoutes);
 app.use('/api/coupons', couponRoutes);
 
 // Health check.
@@ -243,6 +246,9 @@ const server = app.listen(PORT, () => {
   // Admin-created automated campaigns. Off unless CAMPAIGN_AUTOMATION_ENABLED
   // is explicitly 'true', and each campaign must additionally be marked ready.
   startCampaignAutomation();
+  // Multi-step sequences. Same off-switch as the campaign scheduler, so one
+  // variable stops every kind of automated mail.
+  startSequenceEngine();
   // Remove upload temp files orphaned by a crash or restart (23 GB had
   // accumulated in production). Runs now and every 6h.
   startTempSweeper();

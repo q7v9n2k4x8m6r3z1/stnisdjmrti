@@ -35,7 +35,7 @@
  * USAGE
  *   cd /var/www/tododjs/server
  *   node scripts/audit-overgranted-access.mjs
- *   node scripts/audit-overgranted-access.mjs --email info.vireva@gmail.com
+ *   node scripts/audit-overgranted-access.mjs --email customer@example.com
  *   node scripts/audit-overgranted-access.mjs --csv over-granted.csv
  *   node scripts/audit-overgranted-access.mjs --limit 50
  *

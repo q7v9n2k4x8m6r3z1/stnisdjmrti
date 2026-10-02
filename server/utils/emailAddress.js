@@ -6,9 +6,9 @@
  * out of a bulk send, because hard bounces damage sender reputation and a
  * domain that normally sends only receipts has no reputation to spare.
  *
- * A real registration in the database was `tonift24@gmail.con`. A generic
- * format check passes it — `.con` is a well-formed TLD — so format alone is
- * not enough, hence the typo table below.
+ * Real registrations in the database have included addresses ending `.con`
+ * rather than `.com`. A generic format check passes them — `.con` is a
+ * well-formed TLD — so format alone is not enough, hence the typo table below.
  *
  * Nothing here rewrites an address. A typo is reported so a human can correct
  * it; silently mailing a guessed address risks sending someone's discount code

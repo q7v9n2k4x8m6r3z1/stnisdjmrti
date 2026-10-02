@@ -237,9 +237,12 @@ export async function sendBlockedAccountEmail(user) {
 /**
  * Payment failed email sent to user
  */
-export async function sendPaymentFailedEmail(user) {
+// `payUrl` — Stripe's hosted invoice page for the failed invoice. When given,
+// the email's button pays that invoice directly and access is restored
+// automatically; without it the customer is only told that something failed.
+export async function sendPaymentFailedEmail(user, payUrl = null) {
   const lang = user.preferredLanguage || 'es';
-  const { subject, html, text } = getPaymentFailedEmailTemplate(user, lang);
+  const { subject, html, text } = getPaymentFailedEmailTemplate(user, lang, payUrl);
   
   return sendEmail({
     to: user.email,

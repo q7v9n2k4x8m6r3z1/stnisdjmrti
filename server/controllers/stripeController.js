@@ -643,8 +643,19 @@ async function handleInvoicePaymentFailed(invoice) {
 
   // Only email on the first failure — Stripe retries up to 4 times over 10 days.
   // Subsequent retries are silent to avoid flooding the user with failure emails.
+  //
+  // hosted_invoice_url is Stripe's own payment page for THIS invoice. Paying
+  // there fires invoice.paid and handleInvoicePaid restores access with no
+  // manual step, so sending it is what makes recovery self-service rather than
+  // something an admin has to chase per customer.
   if (invoice.attempt_count === 1) {
-    sendPaymentFailedEmail(user)
+    if (!invoice.hosted_invoice_url) {
+      console.warn(
+        `invoice.payment_failed: invoice ${invoice.id} has no hosted_invoice_url — ` +
+        `emailing ${user.email} without a pay link (recovery will need a link sent by hand)`
+      );
+    }
+    sendPaymentFailedEmail(user, invoice.hosted_invoice_url || null)
       .catch(err => console.error('Payment failed email error:', err));
   }
 }

@@ -78,6 +78,8 @@ const translations = {
       message: 'We were unable to process your payment. Please update your payment method to continue your subscription.',
       reason: 'This could be due to insufficient funds, an expired card, or a declined transaction.',
       button: 'Update Payment Method',
+      payMessage: 'You can settle the outstanding invoice right now, securely through Stripe. Access is restored automatically as soon as the payment goes through.',
+      payButton: 'Pay Outstanding Invoice',
       footer: 'If you need help, please contact our support team.',
       copyright: 'All rights reserved.'
     },
@@ -212,6 +214,8 @@ const translations = {
       message: 'No pudimos procesar tu pago. Por favor actualiza tu método de pago para continuar con tu suscripción.',
       reason: 'Esto podría deberse a fondos insuficientes, una tarjeta vencida o una transacción rechazada.',
       button: 'Actualizar Método de Pago',
+      payMessage: 'Puedes pagar la factura pendiente ahora mismo, de forma segura a través de Stripe. Tu acceso se restablece automáticamente en cuanto se procese el pago.',
+      payButton: 'Pagar Factura Pendiente',
       footer: 'Si necesitas ayuda, por favor contacta a nuestro equipo de soporte.',
       copyright: 'Todos los derechos reservados.'
     },
@@ -539,7 +543,22 @@ export function getSubscriptionCancelledEmailTemplate(user, planName, accessUnti
   };
 }
 
-export function getPaymentFailedEmailTemplate(user, lang = 'es') {
+// `payUrl` is Stripe's hosted invoice page for the invoice that failed
+// (invoice.hosted_invoice_url). Passing it turns this from a notice into
+// something the customer can act on: without it the button pointed at the
+// site's home page, which offers no way to settle an outstanding invoice, so
+// every recovery had to be chased by hand with a link sent over WhatsApp.
+//
+// Paying there fires invoice.paid, which restores access automatically
+// (handleInvoicePaid) — the link is the whole self-service path.
+//
+// Null for standalone card failures that are not tied to an invoice; the
+// original "update your payment method" wording is kept for those, since
+// there is no invoice to pay.
+export function getPaymentFailedEmailTemplate(user, lang = 'es', payUrl = null) {
+  const ctaUrl = payUrl || FRONTEND_URL;
+  const ctaLabel = payUrl ? t(lang, 'paymentFailed.payButton') : t(lang, 'paymentFailed.button');
+
   const content = `
     <div style="padding: 30px;">
       <p style="font-size: 16px; color: #e0e0e0; line-height: 1.6;">${t(lang, 'paymentFailed.greeting')} <strong>${user.name}</strong>,</p>
@@ -547,8 +566,9 @@ export function getPaymentFailedEmailTemplate(user, lang = 'es') {
       <div style="margin: 15px 0; padding: 12px 16px; background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.2); border-radius: 8px;">
         <p style="margin: 0; font-size: 14px; color: #ef4444;">${t(lang, 'paymentFailed.reason')}</p>
       </div>
+      ${payUrl ? `<p style="font-size: 15px; color: #a0a0a0; line-height: 1.6;">${t(lang, 'paymentFailed.payMessage')}</p>` : ''}
       <div style="margin: 25px 0;">
-        <a href="${FRONTEND_URL}" style="display: inline-block; background: #6366f1; color: #ffffff; padding: 12px 28px; border-radius: 8px; text-decoration: none; font-weight: 600; font-size: 15px;">${t(lang, 'paymentFailed.button')}</a>
+        <a href="${ctaUrl}" style="display: inline-block; background: #6366f1; color: #ffffff; padding: 12px 28px; border-radius: 8px; text-decoration: none; font-weight: 600; font-size: 15px;">${ctaLabel}</a>
       </div>
       <p style="font-size: 14px; color: #666; line-height: 1.6;">${t(lang, 'paymentFailed.footer')}</p>
     </div>

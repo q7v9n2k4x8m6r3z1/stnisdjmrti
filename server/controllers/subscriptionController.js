@@ -1,5 +1,5 @@
 import SubscriptionPlan from '../models/SubscriptionPlan.js';
-import User, { PAST_DUE_GRACE_MS } from '../models/User.js';
+import User, { PAST_DUE_GRACE_MS, hasActiveWindow } from '../models/User.js';
 import stripe from '../config/stripe.js';
 import { sendSubscriptionCancelledEmail, notifyAdminCancelledSubscription } from '../services/emailService.js';
 import { parseDeviceInfo } from '../utils/deviceParser.js';
@@ -113,34 +113,44 @@ export const getSubscriptionStatus = async (req, res) => {
       const hasStripeSubscription = !!user.subscription.stripeSubscriptionId;
       const shouldExpireLocally = !hasStripeSubscription || hoursSinceExpiry > 48;
 
-      if (shouldExpireLocally && user.subscription.status !== 'expired') {
+      if (shouldExpireLocally) {
+        // Guarded and atomic — the endDate condition is re-checked by the
+        // database at write time rather than against the copy loaded above.
+        // A payment landing while this request was in flight moves endDate
+        // forward with an atomic $set from handleInvoicePaid; a full-document
+        // save from this stale copy would stamp 'expired' over it and leave a
+        // customer who had just paid locked out with a future endDate.
+        await User.updateOne(
+          {
+            _id: user._id,
+            'subscription.status': { $ne: 'expired' },
+            'subscription.endDate': { $lt: new Date() }
+          },
+          { $set: { 'subscription.status': 'expired' } }
+        );
+        // Mirror it in the copy we report from, so the status this endpoint
+        // returns matches what was just persisted without a second read.
         user.subscription.status = 'expired';
-        await user.save();
       }
     }
 
-    const status = user.subscription.status;
     // Admin-granted plans with no endDate = unlimited (-1 signals "no expiry")
     const daysRemaining = user.subscription.endDate
       ? Math.max(0, Math.ceil((user.subscription.endDate - new Date()) / (1000 * 60 * 60 * 24)))
       : -1;
-    // isActive must mirror requireSubscription (middleware/subscription.js) and
-    // User.canDownload exactly — it is what the UI labels the account with, so
-    // any divergence shows the customer one thing while the download endpoints
-    // do another:
-    //   - 'active'                        → yes
-    //   - 'past_due' INSIDE the paid period → yes; the failed renewal is for the
-    //     NEXT period, and this clause was missing here, so a customer whose
-    //     card failed mid-period was labelled inactive while downloads worked
-    //   - 'cancelled' inside the paid period → yes (cancel_at_period_end)
-    //   - 'past_due' past endDate         → only within PAST_DUE_GRACE_MS
-    // NOTE: isWithinPeriod is false when endDate is null — no paid period to retain.
-    const isWithinPeriod = !!user.subscription.endDate && new Date() <= new Date(user.subscription.endDate);
-    const isActive =
-      status === 'active' ||
-      (status === 'past_due' && isWithinPeriod) ||
-      (status === 'cancelled' && isWithinPeriod) ||
-      isPastDueInGrace;
+
+    // isActive is what the UI labels the account with, so it must agree with
+    // requireSubscription and User.canDownload exactly — any divergence shows
+    // the customer one thing while the download endpoints do another.
+    //
+    // Delegated to the shared predicate rather than restated here, which is
+    // the rule for this question (see CLAUDE.md). The copy that used to live
+    // in this function was missing hasActiveWindow's stale-active guard: an
+    // 'active' status whose endDate has already passed is stale data, not
+    // entitlement. Inside the 48h webhook-delivery window above the record
+    // deliberately stays 'active' past endDate, so this endpoint reported
+    // isActive:true for accounts every download endpoint was already 403ing.
+    const isActive = hasActiveWindow(user.subscription);
 
     res.status(200).json({
       success: true,

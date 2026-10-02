@@ -70,10 +70,27 @@ export const requireSubscription = async (req, res, next) => {
     // Subscription expired — check endDate first before status.
     // Skip for past_due users still within the retry grace window.
     if (!isPastDueInGrace && user.subscription.endDate && new Date() > new Date(user.subscription.endDate)) {
-      if (user.subscription.status !== 'expired') {
-        user.subscription.status = 'expired';
-        await user.save();
-      }
+      // Guarded and atomic, and re-evaluated by the database rather than
+      // against the copy loaded at the top of this request.
+      //
+      // A payment landing mid-request moves endDate forward with an atomic
+      // $set from handleInvoicePaid. Writing 'expired' afterwards from this
+      // now-stale copy left the account with a FUTURE endDate and an expired
+      // status — and status is what every gate reads, so a customer who had
+      // just paid stayed locked out until the reconciler repaired it up to six
+      // hours later. The endDate condition below re-checks at write time, so
+      // that write simply does not happen.
+      //
+      // The 403 on this one request still stands; it self-heals on the next
+      // one. Only the persisted status was doing lasting damage.
+      await User.updateOne(
+        {
+          _id: user._id,
+          'subscription.status': { $ne: 'expired' },
+          'subscription.endDate': { $lt: new Date() }
+        },
+        { $set: { 'subscription.status': 'expired' } }
+      );
       return res.status(403).json({
         success: false,
         message: 'Subscription expired',
@@ -211,10 +228,19 @@ export const optionalSubscription = async (req, res, next) => {
       return next();
     }
 
-    // Check if subscription expired
+    // Check if subscription expired.
+    // Same guarded atomic write as requireSubscription: a full-document save
+    // from this stale copy could stamp 'expired' over an activation that a
+    // payment webhook wrote while this request was in flight.
     if (user.subscription.endDate && new Date() > user.subscription.endDate) {
-      user.subscription.status = 'expired';
-      await user.save();
+      await User.updateOne(
+        {
+          _id: user._id,
+          'subscription.status': { $ne: 'expired' },
+          'subscription.endDate': { $lt: new Date() }
+        },
+        { $set: { 'subscription.status': 'expired' } }
+      );
       req.hasSubscription = false;
       return next();
     }

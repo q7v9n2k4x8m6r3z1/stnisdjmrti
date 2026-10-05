@@ -1,6 +1,7 @@
 import { useNavigate } from 'react-router-dom';
 import { ArrowLeft } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
+import { ContactEmail } from '../utils/contact.jsx';
 
 export default function TermsPage() {
   const navigate = useNavigate();
@@ -60,7 +61,7 @@ export default function TermsPage() {
               {isEs
                 ? 'El usuario es responsable de mantener la confidencialidad de sus credenciales. En caso de uso no autorizado, debe notificarlo inmediatamente a '
                 : 'The user is responsible for maintaining the confidentiality of their credentials. In the event of unauthorized use, they must notify '}
-              <a href="mailto:contacto.tododjs@gmail.com" className="text-accent hover:underline">contacto.tododjs@gmail.com</a>
+              <ContactEmail />
               {isEs ? ' de inmediato.' : ' immediately.'}
             </p>
           </section>
@@ -169,7 +170,7 @@ export default function TermsPage() {
             </ul>
             <p className="mt-3">
               {isEs ? 'Para cualquier problema relacionado con pagos o facturación: ' : 'For any issues related to payments or billing: '}
-              <a href="mailto:contacto.tododjs@gmail.com" className="text-accent hover:underline">contacto.tododjs@gmail.com</a>
+              <ContactEmail />
             </p>
           </section>
 
@@ -345,9 +346,7 @@ export default function TermsPage() {
             <h2 className="text-lg font-semibold text-white mb-3">{isEs ? '15. Contacto' : '15. Contact'}</h2>
             <p>
               {isEs ? 'Para cualquier consulta sobre estos Términos:' : 'For any inquiries about these Terms:'}{' '}
-              <a href="mailto:contacto.tododjs@gmail.com" className="text-accent hover:underline">
-                contacto.tododjs@gmail.com
-              </a>
+              <ContactEmail />
             </p>
           </section>
 

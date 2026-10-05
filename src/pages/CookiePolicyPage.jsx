@@ -1,6 +1,7 @@
 import { useNavigate } from 'react-router-dom';
 import { ArrowLeft } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
+import { ContactEmail } from '../utils/contact.jsx';
 
 export default function CookiePolicyPage() {
   const navigate = useNavigate();
@@ -198,9 +199,7 @@ export default function CookiePolicyPage() {
             <h2 className="text-lg font-semibold text-white mb-3">{isEs ? '7. Contacto' : '7. Contact'}</h2>
             <p>
               {isEs ? 'Para cualquier consulta sobre esta política, puedes contactarnos en' : 'For any queries about this policy, you can contact us at'}{' '}
-              <a href="mailto:contacto.tododjs@gmail.com" className="text-accent hover:underline">
-                contacto.tododjs@gmail.com
-              </a>.
+              <ContactEmail />.
             </p>
           </section>
 

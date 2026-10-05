@@ -2,9 +2,14 @@ import crypto from 'crypto';
 import { sendEmail } from '../services/emailService.js';
 import { uploadToWasabi, getSignedDownloadUrl } from '../config/wasabi.js';
 
-// Comma-separated list — lets the notification land in BOTH the Gmail inbox
-// and the Hostinger mailbox (e.g. "contacto.tododjs@gmail.com,contacto@tododjs.com").
-const ADMIN_EMAILS = (process.env.ADMIN_EMAIL || 'contacto.tododjs@gmail.com')
+// Comma-separated list supported, so one notification can land in several
+// inboxes (e.g. a Gmail account and a domain mailbox).
+//
+// No hardcoded fallback: the address used to be inlined here, which published
+// it with the source. ADMIN_EMAIL must be set in server/.env — if it is not,
+// submitContact logs loudly and still returns success to the sender, because
+// a misconfigured notification is our problem, not theirs.
+const ADMIN_EMAILS = (process.env.ADMIN_EMAIL || '')
   .split(',')
   .map(e => e.trim())
   .filter(Boolean);
@@ -72,7 +77,18 @@ export const submitContact = async (req, res) => {
     const safePhone = escapeHtml(phone?.trim() || '—');
     const safeMessage = escapeHtml(message);
 
-    await sendEmail({
+    // Without a destination there is nothing to notify. Log it rather than
+    // calling sendEmail with an empty recipient list, which Resend rejects —
+    // that would throw into the catch below and show the visitor a failure
+    // for a problem entirely on our side. The acknowledgement to the sender
+    // below still goes out, and the submission is not lost silently: this
+    // line names the misconfiguration.
+    if (ADMIN_EMAILS.length === 0) {
+      console.error(
+        '[contact] ADMIN_EMAIL is not set — no admin notification sent for a ' +
+        `submission from ${email}. Set ADMIN_EMAIL in server/.env.`
+      );
+    } else await sendEmail({
       to: ADMIN_EMAILS,
       subject: `[Contacto] ${safeSubject} — ${safeName}`,
       html: `

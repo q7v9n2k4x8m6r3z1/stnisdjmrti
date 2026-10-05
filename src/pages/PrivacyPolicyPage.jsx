@@ -1,6 +1,7 @@
 import { useNavigate } from 'react-router-dom';
 import { ArrowLeft } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
+import { CONTACT_EMAIL, ContactEmail } from '../utils/contact.jsx';
 
 export default function PrivacyPolicyPage() {
   const navigate = useNavigate();
@@ -28,7 +29,7 @@ export default function PrivacyPolicyPage() {
             <ul className="space-y-1 pl-4 list-disc list-inside">
               <li><strong className="text-white">{isEs ? 'Responsable:' : 'Data Controller:'}</strong> TodoDJS</li>
               <li><strong className="text-white">{isEs ? 'Dirección:' : 'Address:'}</strong> 4111 Hollowtrail Dr, Tampa, FL, United States</li>
-              <li><strong className="text-white">{isEs ? 'Correo electrónico:' : 'Email:'}</strong> contacto.tododjs@gmail.com</li>
+              <li><strong className="text-white">{isEs ? 'Correo electrónico:' : 'Email:'}</strong> {CONTACT_EMAIL}</li>
               <li><strong className="text-white">{isEs ? 'Sitio web:' : 'Website:'}</strong> www.tododjs.com</li>
             </ul>
           </section>
@@ -125,9 +126,7 @@ export default function PrivacyPolicyPage() {
                 : 'The user may request access, rectification, or deletion of their personal data by sending a request to:'}
             </p>
             <p className="mt-2">
-              <a href="mailto:contacto.tododjs@gmail.com" className="text-accent hover:underline">
-                contacto.tododjs@gmail.com
-              </a>
+              <ContactEmail />
             </p>
             <p className="mt-2">
               {isEs

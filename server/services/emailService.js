@@ -254,7 +254,7 @@ export async function sendPaymentFailedEmail(user, payUrl = null) {
 
 // ─── Admin Notification Emails ───
 
-// Comma-separated list supported (e.g. "contacto.tododjs@gmail.com,info@tododjs.com")
+// Comma-separated list supported, so notifications can land in several inboxes
 // so notifications can land in multiple inboxes. Previously this was passed to
 // sendEmail as a single raw string; Resend rejects a comma-joined string as one
 // malformed address, so EVERY admin notification (suspicious downloads, new

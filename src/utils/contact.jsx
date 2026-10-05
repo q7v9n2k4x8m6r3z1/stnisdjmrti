@@ -21,11 +21,26 @@
  */
 export const CONTACT_EMAIL = (import.meta.env.VITE_CONTACT_EMAIL || '').trim();
 
-if (!CONTACT_EMAIL && import.meta.env.DEV) {
-  console.warn(
-    '[contact] VITE_CONTACT_EMAIL is not set — the legal pages will display no ' +
-    'contact address. Set it in .env.local (dev) or .env.production.local (build).'
-  );
+/**
+ * The data controller's postal address, for the privacy policy.
+ *
+ * Same reasoning as the email, and the same build-time mechanism. A data
+ * controller legally needs an identifiable address, so this is not something
+ * to simply delete — it moves out of source and into the deployment.
+ */
+export const CONTACT_ADDRESS = (import.meta.env.VITE_CONTACT_ADDRESS || '').trim();
+
+if (import.meta.env.DEV) {
+  const missing = [
+    CONTACT_EMAIL ? null : 'VITE_CONTACT_EMAIL',
+    CONTACT_ADDRESS ? null : 'VITE_CONTACT_ADDRESS',
+  ].filter(Boolean);
+  if (missing.length) {
+    console.warn(
+      `[contact] ${missing.join(' and ')} not set — the legal pages will omit ` +
+      'those details. Set them in .env.local (dev) or .env.production.local (build).'
+    );
+  }
 }
 
 /**

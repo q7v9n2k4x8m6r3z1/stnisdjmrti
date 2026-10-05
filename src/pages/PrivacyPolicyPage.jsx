@@ -1,7 +1,7 @@
 import { useNavigate } from 'react-router-dom';
 import { ArrowLeft } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import { CONTACT_EMAIL, ContactEmail } from '../utils/contact.jsx';
+import { CONTACT_EMAIL, CONTACT_ADDRESS, ContactEmail } from '../utils/contact.jsx';
 
 export default function PrivacyPolicyPage() {
   const navigate = useNavigate();
@@ -28,8 +28,15 @@ export default function PrivacyPolicyPage() {
             <h2 className="text-lg font-semibold text-white mb-3">{isEs ? '1. Responsable del Tratamiento' : '1. Data Controller'}</h2>
             <ul className="space-y-1 pl-4 list-disc list-inside">
               <li><strong className="text-white">{isEs ? 'Responsable:' : 'Data Controller:'}</strong> TodoDJS</li>
-              <li><strong className="text-white">{isEs ? 'Dirección:' : 'Address:'}</strong> 4111 Hollowtrail Dr, Tampa, FL, United States</li>
-              <li><strong className="text-white">{isEs ? 'Correo electrónico:' : 'Email:'}</strong> {CONTACT_EMAIL}</li>
+              {/* Omitted entirely when unconfigured — a label with nothing
+                  after it reads worse than no row, and makes a misconfigured
+                  build harder to spot. */}
+              {CONTACT_ADDRESS && (
+                <li><strong className="text-white">{isEs ? 'Dirección:' : 'Address:'}</strong> {CONTACT_ADDRESS}</li>
+              )}
+              {CONTACT_EMAIL && (
+                <li><strong className="text-white">{isEs ? 'Correo electrónico:' : 'Email:'}</strong> {CONTACT_EMAIL}</li>
+              )}
               <li><strong className="text-white">{isEs ? 'Sitio web:' : 'Website:'}</strong> www.tododjs.com</li>
             </ul>
           </section>

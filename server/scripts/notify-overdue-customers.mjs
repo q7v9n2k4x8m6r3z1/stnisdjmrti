@@ -56,6 +56,21 @@ const num = (name, dflt) => {
 const limit = num('limit', Infinity);
 const resendAfterHours = num('resend-after', null);
 
+// --to <address>: send ONE email to that address instead of to a customer.
+//
+// `--limit 1 --apply` is not a test — it mails a real customer who has not
+// yet heard from us. This exists so the admin can read the thing that is
+// about to go out, and click the pay link, before anyone else receives it.
+//
+// It borrows the first candidate's REAL invoice URL, because a test with a
+// fake link proves nothing about the part most likely to be wrong. It does
+// not stamp overdueNoticeSentAt: that customer has still not been notified,
+// and must not be skipped on the real run.
+const testTo = (() => {
+  const i = argv.indexOf('--to');
+  return i === -1 ? null : (argv[i + 1] || null);
+})();
+
 const SEND_INTERVAL_MS = 800;
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 const iso = (d) => (d ? new Date(d).toISOString().slice(0, 16).replace('T', ' ') : '—');
@@ -101,6 +116,35 @@ for await (const inv of stripe.invoices.list({ status: 'open', limit: 100 })) {
 // Oldest debt first — those have been failing longest and are closest to
 // being cut off.
 candidates.sort((a, b) => b.attempts - a.attempts);
+
+if (testTo) {
+  const sample = candidates[0];
+  if (!sample) {
+    console.log('No candidates, so there is nothing to render a test from.');
+    await mongoose.disconnect();
+    process.exit(0);
+  }
+  console.log(`TEST SEND to ${testTo}`);
+  console.log(`Rendered from ${sample.user.email} — their real pay link, their amount.`);
+  console.log(`That customer is NOT being notified and will still be included in the real run.\n`);
+
+  if (!APPLY) {
+    console.log('DRY RUN — add --apply to actually send this test.');
+    await mongoose.disconnect();
+    process.exit(0);
+  }
+
+  // Their language, so the test shows what they will really receive.
+  const res = await sendPaymentFailedEmail(
+    { ...sample.user, email: testTo },
+    sample.payUrl
+  );
+  console.log(res?.success
+    ? `SENT to ${testTo} (id ${res.id}). Open it, read the Spanish, and click the pay button — it should load a Stripe invoice for ${sample.amount.toFixed(2)} ${sample.currency}.`
+    : `FAILED: ${res?.error || 'unknown error'}`);
+  await mongoose.disconnect();
+  process.exit(res?.success ? 0 : 1);
+}
 
 const suppressed = await Suppression.filterSuppressed(candidates.map(c => c.user.email));
 

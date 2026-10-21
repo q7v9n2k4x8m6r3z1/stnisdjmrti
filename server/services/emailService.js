@@ -17,7 +17,25 @@ import {
   getAdminExpiredSubscriptionTemplate
 } from './emailTemplates.js';
 
-const resend = new Resend(process.env.RESEND_API_KEY);
+// Built on first use, not at import.
+//
+// `new Resend(undefined)` THROWS. Constructing it at module scope made a
+// missing or mistyped RESEND_API_KEY a total outage rather than a loss of
+// email: server.js imports the routes, which import the controllers, which
+// import this file — so the throw happens before the HTTP listener exists and
+// the whole API fails to boot. A one-character slip in .env during a deploy
+// took the site down instead of just the mail.
+//
+// Deferring it keeps that failure proportionate: the site serves, downloads
+// work, and the emails that cannot be sent say so in the logs.
+let resendClient = null;
+function getResend() {
+  if (resendClient) return resendClient;
+  const key = process.env.RESEND_API_KEY;
+  if (!key) return null;
+  resendClient = new Resend(key);
+  return resendClient;
+}
 const FROM_EMAIL = process.env.RESEND_FROM_EMAIL || 'TodoDJs <hello@tododjs.com>';
 const REPLY_TO_EMAIL = process.env.RESEND_REPLY_TO || 'support@tododjs.com';
 const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:5173';
@@ -28,6 +46,12 @@ const UNSUBSCRIBE_EMAIL = process.env.RESEND_UNSUBSCRIBE_EMAIL || 'support@todod
  */
 export async function sendEmail({ to, subject, html, text, replyTo, headers }) {
   try {
+    const resend = getResend();
+    if (!resend) {
+      console.error(`[email] RESEND_API_KEY is not set — not sending "${subject}" to ${to}`);
+      return { success: false, error: 'RESEND_API_KEY is not configured' };
+    }
+
     const payload = {
       from: FROM_EMAIL,
       // Resend SDK v3+ expects camelCase `replyTo` — the legacy `reply_to`

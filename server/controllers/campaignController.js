@@ -18,6 +18,7 @@ import { sendEmail } from '../services/emailService.js';
 import { buildUnsubscribeUrl } from '../utils/unsubscribeToken.js';
 import { checkEmailAddress } from '../utils/emailAddress.js';
 import { runCampaignPass, buildAudienceQuery } from '../services/campaignSender.js';
+import stripe from '../config/stripe.js';
 
 /** Fields an admin may set. Anything else in the body is ignored. */
 const EDITABLE = [
@@ -202,6 +203,48 @@ export const deleteCampaign = async (req, res) => {
         success: false,
         message: 'This campaign is sending. Pause it before deleting.',
       });
+    }
+
+    // Deleting the campaign would un-gate its discount code.
+    //
+    // checkCampaignDiscount enforces the per-recipient window by finding a
+    // Campaign that claims the code. No campaign, no governance: the code
+    // falls through to Stripe's own rules, and these codes are issued with no
+    // redemption cap and no expiry because OUR window was the limit. So
+    // deleting a finished campaign would quietly turn a 24-hour offer for a
+    // handful of recipients into an unlimited public discount — with nothing
+    // in the UI saying so.
+    //
+    // Refuse while the code is still live at Stripe. Deactivating it there is
+    // one click and makes the intent explicit, rather than this endpoint
+    // silently mutating billing configuration as a side effect of a delete.
+    if (campaign.discountCode && campaign.discountValidHours) {
+      let liveCode = null;
+      try {
+        const found = await stripe.promotionCodes.list({
+          code: String(campaign.discountCode).trim().toUpperCase(),
+          active: true,
+          limit: 1,
+        });
+        liveCode = found.data[0] || null;
+      } catch (e) {
+        // Cannot verify — refuse rather than risk un-gating a live code.
+        console.error(`[campaigns] delete blocked: could not check Stripe for ${campaign.discountCode}: ${e.message}`);
+        return res.status(502).json({
+          success: false,
+          message: `Could not check whether ${campaign.discountCode} is still active at Stripe. Try again, or deactivate the code there first.`,
+        });
+      }
+
+      if (liveCode) {
+        return res.status(409).json({
+          success: false,
+          message:
+            `${campaign.discountCode} is still active in Stripe, and this campaign is what limits it ` +
+            `to ${campaign.discountValidHours}h per recipient. Deleting now would make it an unlimited ` +
+            `public discount. Deactivate the code in Stripe first, then delete.`,
+        });
+      }
     }
 
     await Campaign.findByIdAndDelete(req.params.id);

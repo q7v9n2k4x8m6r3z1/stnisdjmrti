@@ -88,6 +88,15 @@ const userSchema = new mongoose.Schema({
       type: Boolean,
       default: false
     },
+    // When we last told this customer their payment had failed and gave them
+    // a link to settle it. Recorded so the notice can be re-run to catch
+    // stragglers without mailing everyone a second time — the intended
+    // workflow is notify, wait, re-run, then revoke whoever has not paid.
+    // Cleared on a successful payment so a later lapse notifies again.
+    overdueNoticeSentAt: {
+      type: Date,
+      default: null
+    },
     stripeCustomerId: String,
     stripeSubscriptionId: String,
     stripePaymentIntentId: String,

@@ -499,6 +499,10 @@ async function handleInvoicePaid(invoice) {
   const set = {
     'subscription.status': 'active',
     'subscription.autoRenew': true,
+    // They have paid, so the overdue notice no longer applies. Clearing it
+    // means a future lapse notifies them again instead of being suppressed
+    // by a stamp from months ago.
+    'subscription.overdueNoticeSentAt': null,
   };
   if (newEndDate) set['subscription.endDate'] = newEndDate;
 

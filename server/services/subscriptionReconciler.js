@@ -48,14 +48,32 @@ export async function reconcileSubscriptions({ dryRun = false } = {}) {
   })) {
     report.checked++;
     const email = typeof s.customer === 'object' ? s.customer?.email : null;
-    if (!email) continue;
+    const customerId = typeof s.customer === 'object' ? s.customer?.id : s.customer;
 
-    const user = await User.findOne({
-      email: new RegExp(`^${email.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i'),
-    }).select('email subscription maxDevices').lean();
+    // Match on the Stripe IDs as well as the email.
+    //
+    // People routinely pay with a different address than the one on their
+    // account — a work address, a PayPal-linked Gmail, a partner's card. An
+    // email-only lookup reported every one of those as "paying at Stripe, no
+    // TodoDJS account" on every hourly run, when the account was there all
+    // along, correctly linked by customer id.
+    //
+    // That is worse than noise. A recurring false alarm is indistinguishable
+    // from a real one, so a customer genuinely paying for nothing would sit
+    // unnoticed in the same list. The IDs are the authoritative link; the
+    // email is only a convenience for accounts predating them.
+    const or = [];
+    if (s.id) or.push({ 'subscription.stripeSubscriptionId': s.id });
+    if (customerId) or.push({ 'subscription.stripeCustomerId': customerId });
+    if (email) {
+      or.push({ email: new RegExp(`^${email.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') });
+    }
+    if (!or.length) continue;
+
+    const user = await User.findOne({ $or: or }).select('email subscription maxDevices').lean();
 
     if (!user) {
-      report.orphans.push({ email, subscriptionId: s.id });
+      report.orphans.push({ email: email || `(no email) ${customerId}`, subscriptionId: s.id });
       continue;
     }
 

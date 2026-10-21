@@ -5,6 +5,7 @@ import User from '../models/User.js';
 import { notifyAdminNewPayment, notifyAdminCancelledSubscription, sendPaymentReceiptEmail, sendSubscriptionCancelledEmail, sendPaymentFailedEmail } from '../services/emailService.js';
 import { customerLocaleFields } from '../utils/stripeLocale.js';
 import { sendPurchaseEvent } from '../services/metaConversions.js';
+import { currentPeriodIsPaid } from '../utils/stripeTruth.js';
 
 // Trailing slashes stripped — FRONTEND_URL=https://site.com/ would otherwise
 // produce double-slash paths that break SPA route matching.
@@ -792,15 +793,25 @@ async function handleSubscriptionUpdated(subscription) {
   // below, that is why users with failed payments kept downloading for weeks.
   //
   // endDate must therefore only ever move forward on evidence of payment.
-  // invoice.paid is what advances it (handleInvoicePaid); here we only accept
-  // it while Stripe reports the subscription as paid.
-  const paidStatuses = ['active', 'trialing'];
-  if (subscription.current_period_end && paidStatuses.includes(subscription.status)) {
+  //
+  // Testing `status === 'active'` is NOT that evidence, which is why the
+  // original fix did not hold. This event fires AT the period rollover,
+  // before Stripe has attempted the charge: current_period_end has already
+  // advanced a month and the status is still legitimately 'active'. Gating on
+  // status therefore recorded a month nobody had paid for, and when the
+  // charge failed moments later nothing moved endDate back. Twenty-two
+  // accounts ended up exactly one month past their last paid invoice, to the
+  // minute, still downloading.
+  //
+  // currentPeriodIsPaid asks the invoice instead, and answers false on any
+  // uncertainty. A missed extension is repaired by invoice.paid or the
+  // reconciler; a wrong extension is unpaid access that nothing reverses.
+  if (subscription.current_period_end && await currentPeriodIsPaid(subscription)) {
     set['subscription.endDate'] = new Date(subscription.current_period_end * 1000);
   } else if (subscription.current_period_end) {
     console.log(
-      `[subscription.updated] user ${user._id}: NOT extending endDate — Stripe status is ` +
-      `'${subscription.status}' (unpaid). Keeping paid-through ${user.subscription.endDate}`
+      `[subscription.updated] user ${user._id}: NOT extending endDate — latest invoice ` +
+      `is not paid (Stripe status '${subscription.status}'). Keeping paid-through ${user.subscription.endDate}`
     );
   }
   if (typeof subscription.cancel_at_period_end === 'boolean') set['subscription.cancelAtPeriodEnd'] = subscription.cancel_at_period_end;

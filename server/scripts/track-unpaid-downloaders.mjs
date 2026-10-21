@@ -146,9 +146,21 @@ for (const [customerId, debt] of owing) {
 
   let reason = verdict.reason;
   const end = user.subscription?.endDate ? new Date(user.subscription.endDate) : null;
-  if (verdict.allowed && reason === 'STATUS ACTIVE') {
-    if (paidThrough && end && end.getTime() > paidThrough.getTime() + 60_000) reason = 'OVER-GRANTED';
-    else if (paidThrough) reason = 'PAID THROUGH LATER';
+
+  // Compare against what Stripe was actually PAID for on every allowed
+  // verdict, not just 'active'.
+  //
+  // This check used to run only for STATUS ACTIVE, which hid the bulk of the
+  // problem: an account whose endDate reaches a month past its last paid
+  // invoice is over-granted whether its status says active, past_due or
+  // cancelled. Restricting the comparison to one status reported those as
+  // INSIDE PAID PERIOD — the label for correct behaviour — and undercounted
+  // the defect roughly threefold.
+  const overGranted = paidThrough && end && end.getTime() > paidThrough.getTime() + 60_000;
+  if (verdict.allowed && overGranted) {
+    reason = 'OVER-GRANTED';
+  } else if (verdict.allowed && reason === 'STATUS ACTIVE' && paidThrough) {
+    reason = 'PAID THROUGH LATER';
   }
   if (verdict.allowed && user.subscription?.grantedByAdmin && reason !== 'ADMIN ROLE') {
     reason += ' + admin grant';

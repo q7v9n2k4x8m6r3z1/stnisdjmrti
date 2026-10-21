@@ -25,6 +25,53 @@ export const subIdOf = (inv) => {
 };
 
 /**
+ * Is this subscription's CURRENT period actually paid for?
+ *
+ * The question every writer of `endDate` has to answer, and the one that
+ * `subscription.status === 'active'` does NOT answer.
+ *
+ * Stripe advances `current_period_end` at the period rollover and fires
+ * customer.subscription.updated THEN — before it has attempted the charge. At
+ * that instant the status is legitimately 'active' and the period end is
+ * already a month further out. A writer gated on status therefore records a
+ * month the customer has not paid for; seconds later the charge fails, the
+ * status becomes past_due, and nothing ever moves endDate back.
+ *
+ * That is how 22 accounts ended up with endDate exactly one month beyond
+ * their last paid invoice, to the minute, and kept downloading. The 31 Aug
+ * fix tested status, which is the wrong signal — this tests the invoice.
+ *
+ * Returns true only on positive evidence of payment. Every failure mode
+ * (lookup error, no invoice, unexpected shape) returns FALSE, because the
+ * cost of wrongly advancing endDate is unpaid access that nothing reverses,
+ * while the cost of wrongly withholding it is a delay until invoice.paid or
+ * the reconciler corrects it.
+ *
+ * @param {object|string} subscription - a Stripe subscription or its id
+ * @returns {Promise<boolean>}
+ */
+export async function currentPeriodIsPaid(subscription) {
+  try {
+    const id = typeof subscription === 'string' ? subscription : subscription?.id;
+    if (!id) return false;
+
+    // A trial has no invoice to pay and is legitimately entitled.
+    if (typeof subscription === 'object' && subscription?.status === 'trialing') return true;
+
+    const sub = await stripe.subscriptions.retrieve(id, { expand: ['latest_invoice'] });
+    const inv = sub?.latest_invoice;
+    if (!inv || typeof inv !== 'object') return false;
+
+    // `paid` is the durable flag; status is checked too because a zero-amount
+    // invoice (100% coupon, credit balance) settles without a payment.
+    return inv.paid === true || inv.status === 'paid' || inv.amount_due === 0;
+  } catch (e) {
+    console.error(`[stripeTruth] currentPeriodIsPaid lookup failed: ${e.message} — treating as UNPAID`);
+    return false;
+  }
+}
+
+/**
  * The plan half of the entitlement question. hasActiveWindow deliberately does
  * NOT consider the plan, and 'free' must be excluded on BOTH fields — the string
  * is truthy, which is how a free-plan account once downloaded (f4f79ce).

@@ -21,6 +21,7 @@
 import stripe from '../config/stripe.js';
 import User from '../models/User.js';
 import SubscriptionPlan from '../models/SubscriptionPlan.js';
+import { currentPeriodIsPaid } from '../utils/stripeTruth.js';
 
 const STALE_TOLERANCE_MS = 60 * 1000; // ignore sub-minute endDate drift
 
@@ -67,6 +68,27 @@ export async function reconcileSubscriptions({ dryRun = false } = {}) {
     const expired = !dbEnd || dbEnd.getTime() < Date.now();
     const stale = periodEnd && dbEnd && periodEnd.getTime() - dbEnd.getTime() > STALE_TOLERANCE_MS;
     if (isActive && !expired && !stale) continue;
+
+    // Stripe listing this subscription as 'active' is not evidence the
+    // current period was paid for.
+    //
+    // At the period rollover Stripe advances current_period_end BEFORE it
+    // attempts the charge, and the subscription stays 'active' until that
+    // attempt fails. This job runs hourly, so it lands in that window
+    // routinely — and the `stale` test above fires precisely because
+    // periodEnd has just jumped ahead of dbEnd. Writing it here granted a
+    // month nobody paid for, and would have kept re-granting it every hour
+    // even after the webhook handler was fixed.
+    //
+    // This job exists to RESTORE access Stripe was paid for. If the period
+    // is not paid, there is nothing to restore.
+    if (!(await currentPeriodIsPaid(s))) {
+      report.suspect.push({
+        email,
+        reason: `current period not paid (Stripe status '${s.status}', latest invoice unpaid) — not extending endDate`,
+      });
+      continue;
+    }
 
     const priceId = s.items?.data?.[0]?.price?.id;
     const plan = priceToPlan[priceId];

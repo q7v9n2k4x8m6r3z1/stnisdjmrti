@@ -161,6 +161,9 @@ export const subscribeWithSavedCard = async (req, res) => {
     user.subscription.planId = planId;
     user.subscription.plan = planId;
     user.subscription.status = 'active';
+    // New purchase supersedes an admin "set to Free" and is not an admin grant.
+    user.subscription.adminRevokedAt = null;
+    user.subscription.grantedByAdmin = false;
     user.subscription.startDate = startDate;
     user.subscription.endDate = endDate;
     user.subscription.stripeCustomerId = customerId;

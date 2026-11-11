@@ -219,6 +219,21 @@ app.get('/api/health', (req, res) => {
   });
 });
 
+// Unknown API route → JSON 404.
+//
+// Express's default 404 is an HTML page ("Cannot POST /api/..."). Every
+// frontend caller does `await res.json()`, so an HTML body surfaces as
+// "Unexpected token '<'" — which is exactly what the staging admin saw when
+// its frontend called a route its older backend did not have yet. A JSON body
+// turns that into a readable "route not found" naming the route.
+app.use('/api', (req, res) => {
+  res.status(404).json({
+    success: false,
+    message: `API route not found: ${req.method} ${req.originalUrl.split('?')[0]}. ` +
+      'If this route exists in the code, this server is running an older build — redeploy it.',
+  });
+});
+
 // Error handler
 app.use((err, req, res, next) => {
   console.error(err.stack);

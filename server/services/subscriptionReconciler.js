@@ -71,7 +71,6 @@ export async function reconcileSubscriptions({ dryRun = false } = {}) {
     if (!or.length) continue;
 
     const user = await User.findOne({ $or: or }).select('email subscription maxDevices').lean();
-
     if (!user) {
       report.orphans.push({ email: email || `(no email) ${customerId}`, subscriptionId: s.id });
       continue;
@@ -82,10 +81,39 @@ export async function reconcileSubscriptions({ dryRun = false } = {}) {
     const periodStart = s.current_period_start ? new Date(s.current_period_start * 1000) : null;
     const dbEnd = sub.endDate ? new Date(sub.endDate) : null;
 
+    // An admin deliberately removed this account's plan. Stripe still showing
+    // the subscription is the leftover we must NOT act on: restoring it here
+    // silently undid the admin's decision within the hour. Reported instead,
+    // so the mismatch (still billed at Stripe, no access here) gets a human.
+    if (sub.adminRevokedAt) {
+      report.suspect.push({
+        email,
+        reason: `plan removed by an admin on ${new Date(sub.adminRevokedAt).toISOString().slice(0, 10)} ` +
+          `but Stripe subscription ${s.id} is still active — not restoring; cancel it at Stripe if the customer should not be billed`,
+      });
+      continue;
+    }
+
     const isActive = sub.status === 'active' && sub.planId && sub.planId !== 'free';
     const expired = !dbEnd || dbEnd.getTime() < Date.now();
     const stale = periodEnd && dbEnd && periodEnd.getTime() - dbEnd.getTime() > STALE_TOLERANCE_MS;
-    if (isActive && !expired && !stale) continue;
+    if (isActive && !expired && !stale) {
+      // Healthy access but the record is missing its Stripe link (e.g. an
+      // activation path that never stored the ids). Without the subscription
+      // id the account page cannot show the card or a Cancel button, so a
+      // paying customer has no way to stop their own payments. Link it only —
+      // nothing about access changes.
+      if (!sub.stripeSubscriptionId) {
+        if (!dryRun) {
+          await User.updateOne(
+            { _id: user._id, 'subscription.stripeSubscriptionId': { $in: [null, ''] } },
+            { $set: { 'subscription.stripeSubscriptionId': s.id, 'subscription.stripeCustomerId': customerId } }
+          );
+        }
+        report.repaired.push({ email, from: 'active (no Stripe subscription id)', to: `linked to ${s.id}` });
+      }
+      continue;
+    }
 
     // Stripe listing this subscription as 'active' is not evidence the
     // current period was paid for.

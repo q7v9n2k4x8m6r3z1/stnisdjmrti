@@ -177,6 +177,9 @@ export default function AdminUsers({ forcedSegment = null, title, subtitle } = {
       if (data.success) {
         setEditingUser(null);
         fetchUsers(pagination.page);
+        // Setting a paying customer to Free also stops their Stripe billing —
+        // or reports that it could not, which the admin must act on.
+        if (data.warning || data.message) alert(data.warning || data.message);
       } else {
         alert(data.message || 'Failed to update user');
       }
@@ -338,7 +341,9 @@ export default function AdminUsers({ forcedSegment = null, title, subtitle } = {
                                 `expires ${when(r.before?.endDate)} → ${when(r.endDate)}`,
                               // An account can change by having a dead Stripe id
                               // repaired and nothing else — that still needs applying.
-                              r.idsRepaired && 'Stripe ids repaired',
+                              r.idsRepaired && (r.result === 'no_stripe_subscription_found'
+                                ? 'old/invalid Stripe ids cleared (no subscription — normal for a free account)'
+                                : 'Stripe ids repaired'),
                             ].filter(Boolean).join(', ')}
                           </span>
                         </p>
@@ -352,7 +357,16 @@ export default function AdminUsers({ forcedSegment = null, title, subtitle } = {
                     WHICH three. Surface them. */}
                 {bulkResult.success && (() => {
                   const rows = bulkResult.data?.results || [];
-                  const problems = rows.filter(r => r.result !== 'synced');
+                  // An account whose only change is clearing dead ids already
+                  // appears in the change list above; listing it here too as
+                  // "no_stripe_subscription_found" read like conflicting data
+                  // about the same customer.
+                  const problems = rows.filter(r => r.result !== 'synced' && !(r.idsRepaired && bulkResult.dryRun));
+                  const LABELS = {
+                    no_stripe_subscription_found: 'no Stripe subscription (never paid, or free)',
+                    removed_by_admin: 'skipped — set to Free by an admin',
+                    admin_grant: 'skipped — admin-granted plan, not billed by Stripe',
+                  };
                   if (!problems.length) return null;
                   return (
                     <div className="w-full text-right bg-dark-elevated border border-white/10 rounded-lg p-2 max-h-40 overflow-y-auto">
@@ -363,7 +377,7 @@ export default function AdminUsers({ forcedSegment = null, title, subtitle } = {
                           </span>{' '}
                           <span className="text-white">{r.email}</span>{' '}
                           <span className="text-brand-text-tertiary">
-                            {r.result === 'error' ? r.error : r.result}
+                            {r.result === 'error' ? r.error : (LABELS[r.result] || r.result)}
                           </span>
                         </p>
                       ))}
@@ -505,10 +519,24 @@ export default function AdminUsers({ forcedSegment = null, title, subtitle } = {
                           <RoleIcon className="w-4 h-4 text-accent" />
                           <div>
                             <span className="text-sm font-medium text-white">{getPlanLabel(user)}</span>
-                            {user.role !== 'admin' && !isSubActive(user) && (user.subscription?.planId || (user.subscription?.plan && user.subscription?.plan !== 'free')) && (
-                              <div className="text-[10px] text-yellow-500/80 font-medium">
-                                {user.subscription?.status === 'cancelled' ? 'Sub: Cancelled' : user.subscription?.status === 'expired' ? 'Sub: Expired' : 'Sub: Inactive'}
+                            {/* past_due is shown on its own line whatever the access
+                                window says: "Active" alone hid that Stripe's last
+                                charge failed, and the admin could not tell whether
+                                the customer could still download. The answer is the
+                                same rule the download endpoints apply. */}
+                            {user.role !== 'admin' && user.subscription?.status === 'past_due' ? (
+                              <div className="text-[10px] text-red-400 font-medium">
+                                Payment failed · {isSubActive(user)
+                                  ? `can download until ${new Date(user.subscription.endDate).toLocaleDateString(i18n.language, { day: 'numeric', month: 'short' })} (already paid)`
+                                  : 'cannot download'}
                               </div>
+                            ) : user.role !== 'admin' && !isSubActive(user) && (user.subscription?.planId || (user.subscription?.plan && user.subscription?.plan !== 'free')) && (
+                              <div className="text-[10px] text-yellow-500/80 font-medium">
+                                {user.subscription?.status === 'cancelled' ? 'Sub: Cancelled' : user.subscription?.status === 'expired' ? 'Sub: Expired' : 'Sub: Inactive'} · cannot download
+                              </div>
+                            )}
+                            {user.role !== 'admin' && user.subscription?.adminRevokedAt && (
+                              <div className="text-[10px] text-brand-text-tertiary">Set to Free by admin — Stripe sync will not restore</div>
                             )}
                           </div>
                         </div>

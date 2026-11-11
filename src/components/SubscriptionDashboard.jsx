@@ -230,7 +230,14 @@ export default function SubscriptionDashboard({ user, onUpdate }) {
   const { subscription, plan, daysRemaining } = subscriptionData;
   const isPastDue = subscription.status === 'past_due';
   const isCancelled = subscription.status === 'cancelled';
-  const isStripeManaged = !!subscription.stripeSubscriptionId && !subscription.grantedByAdmin;
+  // Billed by Stripe whenever a Stripe subscription is attached — including an
+  // account an admin also touched (grantedByAdmin). Excluding those hid the
+  // card and the Cancel button from customers Stripe was still charging every
+  // month, leaving them no way to stop the payments themselves.
+  const isStripeManaged = !!subscription.stripeSubscriptionId;
+  // past_due is cancellable too: a customer whose card failed must be able to
+  // stop Stripe retrying, not only to update the card. The backend accepts it.
+  const canCancel = ['active', 'past_due'].includes(subscription.status) && !subscription.cancelAtPeriodEnd;
 
   const normalizePlanName = (raw) => {
     if (!raw || raw === 'free') return 'Free';
@@ -406,7 +413,7 @@ export default function SubscriptionDashboard({ user, onUpdate }) {
                   {isSpanish ? 'Acciones' : 'Actions'}
                 </td>
                 <td className="px-6 py-4 space-x-4">
-                  {subscription.status === 'active' && !subscription.cancelAtPeriodEnd && (
+                  {canCancel && (
                     <button onClick={handleCancelSubscription}
                       className="text-sm text-accent hover:text-white transition-colors font-medium">
                       {isSpanish ? 'Cancelar suscripción' : 'Cancel subscription'}

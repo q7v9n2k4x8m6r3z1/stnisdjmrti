@@ -88,6 +88,14 @@ const userSchema = new mongoose.Schema({
       type: Boolean,
       default: false
     },
+    // Set when an admin removes the plan (sets the account to Free). Automatic
+    // Stripe syncs must not restore an account an admin deliberately
+    // downgraded — they skip it and report it. Cleared when the customer buys
+    // again (checkout) or an admin grants a plan or explicitly re-syncs.
+    adminRevokedAt: {
+      type: Date,
+      default: null
+    },
     // When we last told this customer their payment had failed and gave them
     // a link to settle it. Recorded so the notice can be re-run to catch
     // stragglers without mailing everyone a second time — the intended

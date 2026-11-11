@@ -307,7 +307,31 @@ export const updateUser = async (req, res) => {
 
     if (role) user.role = role;
 
-    if (plan !== undefined) {
+    let stripeBillingStopped = null;
+    let stripeStopError = null;
+
+    // The edit form always sends `plan`, even when the admin only changed the
+    // role or the enabled toggle. Treating every save as a grant stamped
+    // grantedByAdmin:true onto paying Stripe customers — which hid their card
+    // and Cancel button, leaving them unable to stop their own payments. Only
+    // act when the plan really changes.
+    const currentPlan = user.subscription.planId || user.subscription.plan || 'free';
+    const requestedPlan = plan === undefined ? undefined : (plan || 'free');
+    // Re-selecting the same paid plan on a lapsed account is a reactivation and
+    // must still go through the grant path. past_due is deliberately excluded:
+    // that customer's card failed, and an unrelated Save must not hand them
+    // access the payment did not buy.
+    const reactivating = requestedPlan !== undefined && requestedPlan !== 'free' &&
+      ['cancelled', 'expired', 'inactive'].includes(user.subscription.status);
+    const planChanged = requestedPlan !== undefined && (requestedPlan !== currentPlan || reactivating);
+
+    // Same plan, new expiry: still honour the date on a true admin grant.
+    if (!planChanged && grantEndDate !== undefined && !user.subscription.stripeSubscriptionId &&
+        currentPlan !== 'free') {
+      user.subscription.endDate = grantEndDate;
+    }
+
+    if (planChanged) {
       if (plan && plan !== 'free') {
         user.subscription.plan   = plan;
         user.subscription.planId = plan; // keep plan and planId in sync for admin grants
@@ -326,6 +350,7 @@ export const updateUser = async (req, res) => {
           );
         }
         user.subscription.grantedByAdmin = true;
+        user.subscription.adminRevokedAt = null;
       } else {
         user.subscription.plan   = 'free';
         user.subscription.planId = null; // clear Stripe planId when reverting to free
@@ -334,6 +359,29 @@ export const updateUser = async (req, res) => {
         user.subscription.endDate        = null;
         user.subscription.grantedByAdmin = false;
         user.subscription.stripeSubscriptionId = user.subscription.stripeSubscriptionId || null;
+        // Marks the downgrade as deliberate so the hourly reconciler and the
+        // bulk sync leave it alone. Without it they saw "active at Stripe, not
+        // active here" and restored the plan within the hour.
+        user.subscription.adminRevokedAt = new Date();
+
+        // Stop future charges. Removing access while Stripe keeps billing would
+        // charge the customer every month for nothing. cancel_at_period_end is
+        // the gentlest stop (no refund, no immediate cancellation, reversible
+        // from the Stripe dashboard); any refund stays a deliberate admin act.
+        const subId = user.subscription.stripeSubscriptionId;
+        if (subId) {
+          try {
+            const live = await stripe.subscriptions.retrieve(subId);
+            if (['active', 'past_due', 'trialing', 'unpaid'].includes(live.status) && !live.cancel_at_period_end) {
+              await stripe.subscriptions.update(subId, { cancel_at_period_end: true });
+              stripeBillingStopped = subId;
+              console.log(`[Admin] updateUser ${user._id}: set to Free — Stripe sub ${subId} set to cancel at period end`);
+            }
+          } catch (err) {
+            stripeStopError = err.message;
+            console.error(`[Admin] updateUser ${user._id}: set to Free but could not stop Stripe sub ${subId}:`, err.message);
+          }
+        }
       }
     }
 
@@ -343,6 +391,9 @@ export const updateUser = async (req, res) => {
 
     res.status(200).json({
       success: true,
+      // Surfaced so the admin knows whether the customer will still be charged.
+      ...(stripeBillingStopped && { message: `Set to Free. Stripe billing stopped (subscription ${stripeBillingStopped} will not renew).` }),
+      ...(stripeStopError && { warning: `Set to Free, but Stripe billing could NOT be stopped (${stripeStopError}). Cancel the subscription in the Stripe dashboard or the customer will keep being charged.` }),
       data: {
         _id: user._id,
         name: user.name,
@@ -615,6 +666,10 @@ export const syncUserStripeSubscription = async (req, res) => {
       }
     }
 
+    // An admin explicitly choosing to follow Stripe for this one account lifts
+    // any earlier "set to Free" override.
+    user.subscription.adminRevokedAt = null;
+
     await user.save();
 
     console.log(`[Admin] Synced Stripe sub for user ${user._id}: status=${newStatus}, endDate=${newEndDate}, planRestored=${restoredPlanId || 'n/a'}`);
@@ -681,6 +736,22 @@ export const bulkSyncStripeSubscriptions = async (req, res) => {
         };
         let subId = user.subscription?.stripeSubscriptionId;
         let customerId = user.subscription?.stripeCustomerId;
+
+        // Admin decisions win over Stripe data in a BULK pass:
+        //  - a plan an admin removed must not be restored by Stripe still
+        //    listing the old subscription;
+        //  - a pure admin grant (no Stripe subscription) must not be replaced
+        //    by whatever old, cancelled subscription an email lookup turns up,
+        //    which flipped working grants to 'cancelled'.
+        // The per-user "Sync from Stripe" button is the deliberate override.
+        const adminOverride = user.subscription?.adminRevokedAt
+          ? 'removed_by_admin'
+          : (user.subscription?.grantedByAdmin && !subId ? 'admin_grant' : null);
+        if (adminOverride) {
+          skipped++;
+          results.push({ email: user.email, result: adminOverride, changed: false });
+          continue;
+        }
 
         // Step 1: if no IDs at all, search Stripe by email
         if (!subId && !customerId) {

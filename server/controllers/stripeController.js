@@ -329,6 +329,10 @@ async function handleCheckoutCompleted(session) {
   user.subscription.planId = planId;
   user.subscription.plan = planId; // Add legacy plan field for compatibility
   user.subscription.status = 'active';
+  // A new purchase is the customer paying of their own accord: it supersedes
+  // an earlier admin "set to Free" and is not an admin grant.
+  user.subscription.adminRevokedAt = null;
+  user.subscription.grantedByAdmin = false;
   user.subscription.startDate = startDate;
   user.subscription.endDate = endDate;
   user.subscription.stripeCustomerId = session.customer || user.subscription.stripeCustomerId;

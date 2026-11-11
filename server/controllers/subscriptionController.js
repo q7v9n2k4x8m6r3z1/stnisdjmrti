@@ -62,7 +62,9 @@ export const getSubscriptionStatus = async (req, res) => {
       .populate('subscription.sharedBy', 'name email');
     
     // Recognize both Stripe-paid (planId set) and admin-granted (plan name set, no planId)
-    const hasPlan = user.subscription.planId ||
+    // 'free' excluded on BOTH fields — the string is truthy, so testing planId
+    // alone reported planId:'free' accounts as holding a subscription.
+    const hasPlan = (user.subscription.planId && user.subscription.planId !== 'free') ||
       (user.subscription.plan && user.subscription.plan !== 'free');
 
     if (!hasPlan || user.subscription.status === 'inactive') {
@@ -295,16 +297,19 @@ export const cancelSubscription = async (req, res) => {
       }
 
       user.subscription.cancelAtPeriodEnd = true;
-      // Sync endDate so isWithinPeriod check works correctly after cancellation
-      if (stripeSubscription.current_period_end) {
+      // Sync endDate so isWithinPeriod works after cancellation — but only when
+      // Stripe says the current period is PAID. For a past_due subscription
+      // current_period_end is the period whose charge FAILED; adopting it here
+      // granted that unpaid month to anyone who cancelled after a failed
+      // renewal (the same bug class fixed in the webhook and sync paths).
+      if (stripeSubscription.current_period_end && ['active', 'trialing'].includes(stripeSubscription.status)) {
         user.subscription.endDate = new Date(stripeSubscription.current_period_end * 1000);
       }
       console.log(`[cancelSubscription] Stripe confirmed cancel_at_period_end for sub ${stripeSubscriptionId}, user ${user._id}`);
 
       // Send cancellation confirmation email now (before period ends)
-      const accessUntil = stripeSubscription?.current_period_end
-        ? new Date(stripeSubscription.current_period_end * 1000)
-        : user.subscription.endDate;
+      // user.subscription.endDate is now the paid-through date either way.
+      const accessUntil = user.subscription.endDate;
       sendSubscriptionCancelledEmail(user, user.subscription.planId || 'N/A', accessUntil)
         .catch(err => console.error('[cancelSubscription] Cancellation email failed:', err));
       // Admin will be notified by handleSubscriptionDeleted webhook at actual period end.

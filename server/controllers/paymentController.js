@@ -423,6 +423,19 @@ export const reactivateSubscription = async (req, res) => {
       });
     }
 
+    // An account an admin set to Free keeps its Stripe subscription id, so
+    // without this it could switch Stripe billing back on — and since renewals
+    // on such an account no longer restore access, the customer would be
+    // charged every month for nothing. They can subscribe again normally.
+    const { planId, plan, adminRevokedAt } = req.user.subscription;
+    const hasPaidPlan = (planId && planId !== 'free') || (plan && plan !== 'free');
+    if (adminRevokedAt || !hasPaidPlan) {
+      return res.status(409).json({
+        success: false,
+        message: 'This subscription cannot be reactivated. Please choose a plan to subscribe again.'
+      });
+    }
+
     // Reactivate subscription
     await stripe.subscriptions.update(stripeSubscriptionId, {
       cancel_at_period_end: false

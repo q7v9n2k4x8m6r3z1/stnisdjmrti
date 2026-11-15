@@ -43,6 +43,7 @@ import sequenceRoutes from './routes/sequence.js';
 import couponRoutes from './routes/coupon.js';
 import mongoose from 'mongoose';
 import { startSubscriptionReconciler } from './services/subscriptionReconciler.js';
+import { isStaging } from './config/stripeTest.js';
 import { startAccessDriftMonitor } from './services/accessDriftMonitor.js';
 import { startWelcomeCampaign } from './services/welcomeCampaign.js';
 import { startCampaignAutomation } from './services/campaignScheduler.js';
@@ -247,14 +248,25 @@ const PORT = process.env.PORT || 5000;
 
 const server = app.listen(PORT, () => {
   console.log(`Server running in ${process.env.NODE_ENV} mode on port ${PORT}`);
-  // Webhook-independent safety net: repairs any account whose Stripe
-  // subscription is active but whose local record disagrees (missed webhooks,
-  // disabled endpoint, downtime). See services/subscriptionReconciler.js.
-  startSubscriptionReconciler();
-  // The reverse question the reconciler structurally cannot ask: which accounts
-  // does OUR record grant that Stripe was never paid for? Reports only — never
-  // revokes. See services/accessDriftMonitor.js.
-  startAccessDriftMonitor();
+  // Staging talks to Stripe TEST mode but shares the PRODUCTION database. The
+  // two Stripe jobs below compare Stripe against the database and act on the
+  // difference — on staging that compares test data against real customers:
+  // the reconciler could overwrite a real account with a test subscription
+  // (matched by email), and the drift monitor reports every real paying
+  // customer as unpaid. They only make sense where Stripe and the database
+  // describe the same customers, i.e. production.
+  if (isStaging) {
+    console.log('[staging] subscription reconciler and access-drift monitor NOT started (test Stripe + shared production DB)');
+  } else {
+    // Webhook-independent safety net: repairs any account whose Stripe
+    // subscription is active but whose local record disagrees (missed webhooks,
+    // disabled endpoint, downtime). See services/subscriptionReconciler.js.
+    startSubscriptionReconciler();
+    // The reverse question the reconciler structurally cannot ask: which accounts
+    // does OUR record grant that Stripe was never paid for? Reports only — never
+    // revokes. See services/accessDriftMonitor.js.
+    startAccessDriftMonitor();
+  }
   // BIENVENIDA10 win-back email. Off unless WELCOME_CAMPAIGN_ENABLED is
   // explicitly 'true', so a deploy cannot start mailing customers by itself.
   startWelcomeCampaign();

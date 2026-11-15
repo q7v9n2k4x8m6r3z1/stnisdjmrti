@@ -3,6 +3,7 @@ import SubscriptionPlan from '../models/SubscriptionPlan.js';
 import Download from '../models/Download.js';
 import { uploadToWasabi, deleteFromWasabi, getSignedDownloadUrl } from '../config/wasabi.js';
 import stripe from '../config/stripe.js';
+import { isStaging } from '../config/stripeTest.js';
 import { sendBlockedAccountEmail } from '../services/emailService.js';
 
 // Shared plan-id variant matcher (covers Stripe planIds, legacy hyphenated
@@ -697,6 +698,19 @@ export const syncUserStripeSubscription = async (req, res) => {
 // @route   POST /api/users/bulk-sync-stripe
 // @access  Private/Admin
 export const bulkSyncStripeSubscriptions = async (req, res) => {
+  // Staging = Stripe TEST mode + the PRODUCTION database. Every real customer's
+  // Stripe id is a live-mode id that test mode reports as "No such
+  // subscription", so applying this would clear the Stripe link of every
+  // paying customer. Even the preview is useless there and takes ~17 minutes
+  // (one failing Stripe lookup per customer), long past the proxy's 60s
+  // timeout — the HTML 504 page is what the admin saw as "Unexpected token '<'".
+  if (isStaging) {
+    return res.status(409).json({
+      success: false,
+      message: 'Stripe bulk sync is disabled on staging: staging uses Stripe test mode but shares the production database, ' +
+        'so it cannot see real customers\' subscriptions and applying it would erase their Stripe links. Run it on the live admin panel.',
+    });
+  }
   try {
     // Preview before writing. One click used to mutate every matching account
     // with no way to see what it would do first — which is how a month of

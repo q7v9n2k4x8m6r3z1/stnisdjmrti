@@ -444,6 +444,20 @@ async function handleInvoicePaid(invoice) {
     return;
   }
 
+  // A renewal paid on an account an admin set to Free must not hand the access
+  // back — "Set to Free" stops renewal at Stripe, so this should only happen if
+  // that stop failed. Flag it loudly: the customer was charged for nothing and
+  // probably needs a refund. A first invoice ('subscription_create') is a new
+  // purchase and proceeds as normal.
+  if (user.subscription?.adminRevokedAt && invoice.billing_reason !== 'subscription_create') {
+    console.error(
+      `[invoice.paid] user ${user._id} (${user.email}) PAID invoice ${invoice.id} ` +
+      `(${(invoice.amount_paid / 100).toFixed(2)} ${invoice.currency}) but their plan was removed by an admin — ` +
+      'access NOT restored. Check Stripe and refund if appropriate.'
+    );
+    return;
+  }
+
   // The initial invoice of a subscription is normally activated by
   // checkout.session.completed, so this handler used to return immediately on
   // billing_reason === 'subscription_create'.
@@ -763,6 +777,17 @@ async function handleSubscriptionUpdated(subscription) {
   });
 
   if (!user) return;
+
+  // An admin set this account to Free. Setting that also stops renewal at
+  // Stripe (cancel_at_period_end), and THAT change fires this very event with
+  // status 'active' — so without this guard the admin's downgrade wrote the
+  // account straight back to 'active' (found in staging testing). The plan
+  // stays removed either way; this keeps the record from claiming otherwise.
+  // A new purchase clears adminRevokedAt in the checkout handler first.
+  if (user.subscription?.adminRevokedAt) {
+    console.log(`[subscription.updated] user ${user._id}: plan removed by admin on ${user.subscription.adminRevokedAt.toISOString?.() || user.subscription.adminRevokedAt} — ignoring Stripe status '${subscription.status}'`);
+    return;
+  }
 
   // Map Stripe statuses to internal statuses
   const statusMap = {

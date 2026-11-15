@@ -1,6 +1,7 @@
 import express from 'express';
 import { getOverview } from '../controllers/adminController.js';
 import { protect, authorize } from '../middleware/auth.js';
+import { isStaging } from '../config/stripeTest.js';
 import { reconcileSubscriptions } from '../services/subscriptionReconciler.js';
 import { detectAccessDrift } from '../services/accessDriftMonitor.js';
 import {
@@ -22,8 +23,15 @@ router.get('/overview', protect, authorize('admin'), getOverview);
 // ?dryRun=1 reports what would change without writing.
 router.post('/reconcile-subscriptions', protect, authorize('admin'), async (req, res) => {
   try {
-    const report = await reconcileSubscriptions({ dryRun: req.query.dryRun === '1' });
-    res.status(200).json({ success: true, data: report });
+    // Staging (Stripe test mode + shared production DB) may only preview: a
+    // real run would write test-mode subscriptions onto production accounts.
+    const dryRun = isStaging || req.query.dryRun === '1';
+    const report = await reconcileSubscriptions({ dryRun });
+    res.status(200).json({
+      success: true,
+      data: report,
+      ...(isStaging && { message: 'Staging: preview only — nothing was written (staging shares the production database).' }),
+    });
   } catch (error) {
     console.error('[reconcile-subscriptions]', error);
     res.status(500).json({ success: false, message: error.message });
